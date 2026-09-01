@@ -23,3 +23,10 @@
 *.swp
 *~
 *.tmp
+.codeassistant/
+**/demo/*.cast
+**/demo/*.mp4
+
+# demo-видео и webm/gif
+**/demo/*.webm
+**/demo/*.gif
