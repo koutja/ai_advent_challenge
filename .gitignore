@@ -1,0 +1,25 @@
+# ===== Общие правила для всего репозитория =====
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# IDE / редакторы
+.idea/
+.vscode/
+*.iml
+.project
+.classpath
+.settings/
+
+# Локальные настройки и секреты
+.env
+.env.*
+*.local
+
+# Временные файлы
+*.swp
+*~
+*.tmp
