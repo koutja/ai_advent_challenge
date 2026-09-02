@@ -27,13 +27,15 @@ const (
 )
 
 // songInfo описывает структурированный ответ для сравнения.
+// Поля объявлены как json.RawMessage: модель может вернуть year и строкой ("1970"),
+// и числом (1970) — это не должно ломать разбор всего JSON.
 type songInfo struct {
-	Song    string `json:"song"`
-	Artist  string `json:"artist"`
-	Genre   string `json:"genre"`
-	Year    string `json:"year"`
-	Parsed  bool   `json:"-"`
-	RawText string `json:"-"`
+	Song    json.RawMessage `json:"song"`
+	Artist  json.RawMessage `json:"artist"`
+	Genre   json.RawMessage `json:"genre"`
+	Year    json.RawMessage `json:"year"`
+	Parsed  bool            `json:"-"`
+	RawText string          `json:"-"`
 }
 
 func main() {
@@ -120,10 +122,10 @@ func runAll(client *llm.Client, prompt string) {
 	fmt.Println(strings.Repeat("-", 82))
 	fmt.Printf("%-28s | %-24s | %-24s\n", "Длина (символов)", itoa(len(freeInfo.RawText)), itoa(len(limInfo.RawText)))
 	fmt.Printf("%-28s | %-24s | %-24s\n", "JSON распарсен", boolStr(freeInfo.Parsed), boolStr(limInfo.Parsed))
-	fmt.Printf("%-28s | %-24s | %-24s\n", "Поле 'song'", quoteOrDash(freeInfo.Song), quoteOrDash(limInfo.Song))
-	fmt.Printf("%-28s | %-24s | %-24s\n", "Поле 'artist'", quoteOrDash(freeInfo.Artist), quoteOrDash(limInfo.Artist))
-	fmt.Printf("%-28s | %-24s | %-24s\n", "Поле 'genre'", quoteOrDash(freeInfo.Genre), quoteOrDash(limInfo.Genre))
-	fmt.Printf("%-28s | %-24s | %-24s\n", "Поле 'year'", quoteOrDash(freeInfo.Year), quoteOrDash(limInfo.Year))
+	fmt.Printf("%-28s | %-24s | %-24s\n", "Поле 'song'", displayField(freeInfo.Song), displayField(limInfo.Song))
+	fmt.Printf("%-28s | %-24s | %-24s\n", "Поле 'artist'", displayField(freeInfo.Artist), displayField(limInfo.Artist))
+	fmt.Printf("%-28s | %-24s | %-24s\n", "Поле 'genre'", displayField(freeInfo.Genre), displayField(limInfo.Genre))
+	fmt.Printf("%-28s | %-24s | %-24s\n", "Поле 'year'", displayField(freeInfo.Year), displayField(limInfo.Year))
 	fmt.Printf("%-28s | %-24s | %-24s\n", "Стоп-маркер применился", "-", boolStr(!strings.Contains(limInfo.RawText, stopSequence)))
 	fmt.Println("\nВывод: 'С ограничениями' возвращает стабильный структурированный JSON;")
 	fmt.Println("'Без ограничений' — свободный текст, который сложнее обрабатывать автоматически.")
@@ -161,11 +163,23 @@ func extractJSON(s string) []byte {
 	return []byte(s)
 }
 
-func quoteOrDash(v string) string {
-	if v == "" {
+// displayField выводит значение поля: срезает кавычки (строка) или оставляет
+// число как есть; пустое поле показывает как '-'.
+func displayField(v json.RawMessage) string {
+	if len(v) == 0 {
 		return "-"
 	}
-	return "'" + v + "'"
+	s := string(v)
+	if i := strings.IndexByte(s, '"'); i == 0 {
+		s = s[1:]
+	}
+	if j := strings.LastIndexByte(s, '"'); j >= 0 && j == len(s)-1 {
+		s = s[:j]
+	}
+	if s == "" {
+		return "-"
+	}
+	return "'" + s + "'"
 }
 
 func boolStr(b bool) string {
