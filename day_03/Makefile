@@ -1,21 +1,35 @@
-.PHONY: run-direct run-step run-prompt-gen run-panel run-all build
+.PHONY: build run-direct run-step run-prompt-gen run-panel run-all report clean
 
-# ===== Отдельные стратегии рассуждения =====
-run-direct:
-	go run . --direct
-
-run-step:
-	go run . --step
-
-run-prompt-gen:
-	go run . --prompt-gen
-
-run-panel:
-	go run . --panel
-
-# Запустить все четыре и вывести сравнение
-run-all:
-	go run . --run-all
+BIN := bin/day_03
 
 build:
-	go build -o llm_client .
+	go build -o $(BIN) .
+
+# ===== Отдельные стратегии (каждая пишет свой results/<метод>.json) =====
+run-direct:
+	go run . direct
+
+run-step:
+	go run . step
+
+run-prompt-gen:
+	go run . prompt-gen
+
+run-panel:
+	go run . panel
+
+# ===== Последовательный запуск всех стратегий с интерактивным прогрессом =====
+# В терминале обновляется панель статусов по каждому методу, детальный вывод
+# пишется в logs/<метод>.log, результаты — в results/<метод>.json.
+# Ошибка одного метода не прерывает прогон.
+run-all: build
+	@mkdir -p results logs
+	@./$(BIN) run-all
+	@echo "Результаты в results/, логи в logs/. Запустите: make report"
+
+# ===== Отчёт/сравнение по собранным результатам =====
+report: build
+	./$(BIN) report
+
+clean:
+	rm -rf bin results
