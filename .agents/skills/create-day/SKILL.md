@@ -32,8 +32,9 @@ description: "Создание каркаса нового дня day_NN для 
 3. **Флаги режимов**: паттерн `parseArgs` — первый аргумент задаёт режим
    (`--mode`), остальные собираются в пользовательский запрос/задачу. Если день
    сравнивает варианты — добавьте режим `--run-all`.
-4. **Makefile**: цели запуска для каждого режима + `build: go build -o llm_client .`
-   (всегда с `-o`, чтобы не плодить бинарники вида `day_NN/day_NN`).
+4. **Makefile**: цели запуска для каждого режима +
+   `build: mkdir -p bin && go build -o bin/llm_client .` — бинарники всегда
+   собираются в `day_NN/bin/` (папка уже в `.gitignore`), а не в корень дня.
 5. **`demo/demo.sh`**: через demo-magic, **без `set -e`**, со ссылкой на skill
    `record-demo`. Видео пишем только по явной просьбе пользователя.
 6. **Проверка**: в конце обязателен `go build ./...` и `go vet ./...` в каждом
@@ -71,7 +72,7 @@ go build ./... && go vet ./...
 | Шаблон                | Назначение                                             |
 |-----------------------|--------------------------------------------------------|
 | `templates/go.mod.tpl`  | go.mod: module `day_NN` + `require`/`replace` на llm  |
-| `templates/Makefile.tpl`| Makefile: `run`, `build` (с `-o llm_client`)          |
+| `templates/Makefile.tpl`| Makefile: `run`, `build` (с `-o bin/llm_client`)     |
 | `templates/main.go.tpl` | main.go-скелет на `llm.New()` + `client.Chat(...)`     |
 | `templates/demo.sh.tpl` | demo-скрипт через demo-magic, без `set -e`            |
 
@@ -79,5 +80,7 @@ go build ./... && go vet ./...
 
 - Забыт `replace aichallenge/llm => ../llm` — сборка падает «cannot find package».
 - Забыт `.env` — `llm.New()` вернёт ошибку про `LLM_API_KEY`.
-- `go build .` без `-o` — появляется лишний бинарник `day_NN/day_NN`.
+- `go build .` без `-o` или без папки `bin/` — появляется лишний бинарник
+  в корне `day_NN/` вместо `day_NN/bin/`. В Makefile всегда
+  `mkdir -p bin && go build -o bin/llm_client .`.
 - `set -e` в demo — одна ошибка обрывает запись (правило AGENTS.md).

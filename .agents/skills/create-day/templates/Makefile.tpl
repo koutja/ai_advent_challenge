@@ -7,6 +7,8 @@
 run:
 	go run .
 
-# Сборка исполняемого файла (всегда с -o, чтобы не плодить бинарники day_NN/day_NN)
+# Сборка исполняемого файла в day_NN/bin/ (папка в .gitignore, бинарник не коммитится).
+# Всегда с -o, чтобы не плодить бинарники в корне day_NN.
 build:
-	go build -o llm_client .
+	mkdir -p bin
+	go build -o bin/llm_client .
