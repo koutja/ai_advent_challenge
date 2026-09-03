@@ -30,3 +30,10 @@
 # demo-видео и webm/gif
 **/demo/*.webm
 **/demo/*.gif
+
+# ===== Генерируемые артефакты day_NN: логи, результаты, бинарники =====
+**/logs/
+**/results/
+**/bin/
+day_03/day_03
+day_02/day_02
