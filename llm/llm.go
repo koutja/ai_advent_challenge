@@ -26,7 +26,7 @@ const (
 	EnvFile        = ".env"
 	DefaultBaseURL = "https://api.openai.com/v1"
 	DefaultModel   = "gpt-4o-mini"
-	httpTimeout    = 30 * time.Second
+	httpTimeout    = 45 * time.Second
 	maxResponse    = 1 << 20 // 1 МБ — защитный лимит на размер тела ответа
 )
 
