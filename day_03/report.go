@@ -86,6 +86,11 @@ func runReport() error {
 			bestMethod = r.Method
 		}
 	}
+	if bestValid < 0 {
+		fmt.Printf("\nВердикт: ни одна стратегия не выполнилась успешно (все ошибки API). Успешных прогонов: %d/%d.\n",
+			totalOK, len(results))
+		return nil
+	}
 	fmt.Printf("\nВердикт: корректный ответ (все 2 комбинации) дал метод %q (валидных: %d). Успешных прогонов: %d/%d.\n",
 		bestMethod, bestValid, totalOK, len(results))
 	return nil

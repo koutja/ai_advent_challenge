@@ -8,52 +8,63 @@ import (
 	"sync"
 	"time"
 
-	"github.com/briandowns/spinner"
 	"golang.org/x/term"
 )
 
-// Reporter показывает живой прогресс в терминале: крутящийся спиннер,
-// имя активного метода, текущий шаг и увеличивающийся каждую секунду счётчик времени.
-// Детальный вывод каждого метода при этом пишется в отдельный лог-файл logs/<метод>.log.
+// Reporter отображает по одной строке на каждый способ решения и обновляет их
+// НА МЕСТЕ (без печати новых блоков): крутящийся спиннер, текущий шаг и
+// увеличивающийся счётчик времени для каждого активного метода.
 //
-// Если Reporter == nil (одиночный запуск подкоманды) — методы output/printf просто
-// печатают в stdout, а визуальные вызовы begin/step/done — no-op.
+// Детальный вывод каждого метода пишется в отдельный лог-файл logs/<метод>.log.
+// В одиночном режиме (stdout=true) детали копятся в буфере и печатаются в stdout
+// только после завершения метода — чтобы не смешиваться со статусной строкой.
 type Reporter struct {
 	mu          sync.Mutex
+	outMu       sync.Mutex // сериализация перерисовки в терминал
 	methods     []string
-	current     string    // активный метод
-	stepText    string    // текущий шаг активного метода
-	started     time.Time // момент начала активного метода
+	steps       map[string]string    // метод -> текущий шаг
+	state       map[string]string    // pending | run | done | error
+	detail      map[string]string    // краткое резюме по завершении
+	started     map[string]time.Time // время старта метода
+	buf         map[string]string    // буфер вывода для одиночного режима
 	logDir      string
-	interactive bool // stdout — терминал (TTY)
 	stdout      bool // детали выводить в stdout, а не в лог-файл
-	sp          *spinner.Spinner
-	tickDone    chan struct{}
+	interactive bool
+	repStart    time.Time
+	drawn       bool
+	rows        int
+	tickStop    chan struct{}
 }
 
-// newReporter создаёт репортёр для коллективного запуска (run-all):
+const frameInterval = 120 * time.Millisecond
+
+var spinnerFrames = []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
+
+// newReporter создаёт репортёр для параллельного запуска (run-all):
 // детали пишутся в logs/<метод>.log.
 func newReporter(methods []string) *Reporter {
 	r := &Reporter{
 		methods:     methods,
-		current:     "",
+		steps:       map[string]string{},
+		state:       map[string]string{},
+		detail:      map[string]string{},
+		started:     map[string]time.Time{},
+		buf:         map[string]string{},
 		logDir:      "logs",
+		repStart:    time.Now(),
 		interactive: term.IsTerminal(int(os.Stdout.Fd())),
+	}
+	for _, m := range methods {
+		r.state[m] = "pending"
 	}
 	r.hideCursor()
 	return r
 }
 
-// newReporterStdout создаёт репортёр для одиночного подкоманды:
-// детали печатаются в stdout (виден ответ), но спиннер и счётчик времени тоже работают.
-func newReporterStdout() *Reporter {
-	r := &Reporter{
-		current:     "",
-		logDir:      "logs",
-		interactive: term.IsTerminal(int(os.Stdout.Fd())),
-		stdout:      true,
-	}
-	r.hideCursor()
+// newReporterStdout — репортёр одиночной подкоманды: спиннер + детали в stdout.
+func newReporterStdout(method string) *Reporter {
+	r := newReporter([]string{method})
+	r.stdout = true
 	return r
 }
 
@@ -63,145 +74,111 @@ func (r *Reporter) hideCursor() {
 	}
 }
 
-// begin запускает спиннер для нового метода.
+// begin отмечает начало работы метода.
 func (r *Reporter) begin(method, step string) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	r.current = method
-	r.setStepLocked(step)
-	r.mu.Unlock()
-	r.startSpin()
+	r.set(method, "run", step, "")
 }
 
-// step обновляет текст текущего шага (без перезапуска спиннера).
+// step обновляет текущий шаг метода.
 func (r *Reporter) step(method, step string) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	if r.current != method {
-		r.mu.Unlock()
-		return
-	}
-	r.setStepLocked(step)
-	r.mu.Unlock()
-	r.updateSuffix()
+	r.set(method, "run", step, "")
 }
 
-// done завершает метод: спиннер останавливается и печатается финальная строка.
+// done завершает метод: меняет статус и печатает финальную строку/буфер.
 func (r *Reporter) done(method, summary string, ok bool) {
-	if r == nil {
-		return
-	}
-	mark := "✓"
+	st := "done"
 	if !ok {
-		mark = "✗"
+		st = "error"
 	}
-	elapsed := int(time.Since(r.started).Seconds())
+	r.set(method, st, "", summary)
+	r.flush(method)
+}
 
+func (r *Reporter) set(method, state, step, detail string) {
 	r.mu.Lock()
-	if r.sp != nil {
-		if r.tickDone != nil {
-			close(r.tickDone)
-			r.tickDone = nil
+	r.state[method] = state
+	if step != "" {
+		r.steps[method] = step
+	}
+	if state == "run" {
+		if _, ok := r.started[method]; !ok {
+			r.started[method] = time.Now()
 		}
-		r.sp.FinalMSG = fmt.Sprintf("%s [%s] %s (%ds)\n", mark, method, summary, elapsed)
-		r.sp.Stop()
-		r.sp = nil
-	} else if !r.interactive {
-		// Не-терминальный режим: просто печатаем строку.
-		fmt.Printf("%s [%s] %s (%ds)\n", mark, method, summary, elapsed)
 	}
-	r.current = ""
+	if detail != "" {
+		r.detail[method] = detail
+	}
 	r.mu.Unlock()
+	r.render()
 }
 
-// finish вызывает финальную перерисовку и возвращает курсор.
+// finish останавливает тикер и возвращает курсор.
 func (r *Reporter) finish() {
-	if r == nil {
-		return
-	}
+	r.stopTicker()
 	if r.interactive {
-		fmt.Print("\033[?25h") // показать курсор
+		fmt.Print("\033[?25h\n")
 	}
 }
 
-func (r *Reporter) setStepLocked(step string) {
-	r.stepText = step
-	r.started = time.Now()
-}
-
-func (r *Reporter) spinSuffix() string {
-	el := int(time.Since(r.started).Seconds())
-	return fmt.Sprintf(" %ds • %s", el, r.stepText)
-}
-
-// startSpin создаёт спиннер и запускает его вместе с тикером счётчика времени.
-func (r *Reporter) startSpin() {
+// startTicker запускает фоновую перерисовку (для анимации спиннера и таймеров).
+func (r *Reporter) startTicker() {
 	if !r.interactive {
 		return
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.sp != nil {
-		return
-	}
-	s := spinner.New(spinner.CharSets[11], 100*time.Millisecond)
-	s.Prefix = "[" + r.current + "] "
-	s.Suffix = r.spinSuffix()
-	r.sp = s
-	r.tickDone = make(chan struct{})
-	go r.tickElapsed()
-	s.Start()
-}
-
-// tickElapsed раз в секунду обновляет счётчик времени в суффиксе спиннера.
-func (r *Reporter) tickElapsed() {
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			r.updateSuffix()
-		case <-r.tickDone:
-			return
+	r.tickStop = make(chan struct{})
+	go func() {
+		t := time.NewTicker(frameInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				r.render()
+			case <-r.tickStop:
+				return
+			}
 		}
-	}
+	}()
 }
 
-func (r *Reporter) updateSuffix() {
-	if r == nil {
+func (r *Reporter) stopTicker() {
+	if r.tickStop == nil {
 		return
 	}
-	r.mu.Lock()
-	s := r.sp
-	var sfx string
-	if s != nil {
-		sfx = r.spinSuffix()
-	}
-	r.mu.Unlock()
-	if s != nil {
-		s.Suffix = sfx
-	}
+	close(r.tickStop)
+	r.tickStop = nil
 }
 
-// output направляет текст в stdout (одиночный режим) либо в лог-файл метода (run-all).
+// output направляет текст в stdout-буфер (одиночный режим) либо в лог-файл (run-all).
 func (r *Reporter) output(method, text string) {
-	if r == nil || r.stdout {
+	if r == nil {
 		fmt.Print(text)
+		return
+	}
+	if r.stdout {
+		r.mu.Lock()
+		r.buf[method] += text
+		r.mu.Unlock()
 		return
 	}
 	r.appendLog(method, text)
 }
 
 func (r *Reporter) printf(method, format string, args ...any) {
-	if r == nil || r.stdout {
-		fmt.Printf(format, args...)
+	r.output(method, fmt.Sprintf(format, args...))
+}
+
+// flush печатает накопленный буфер метода (одиночный режим) после завершения.
+func (r *Reporter) flush(method string) {
+	if !r.stdout {
 		return
 	}
-	r.appendLog(method, fmt.Sprintf(format, args...))
+	r.mu.Lock()
+	text := r.buf[method]
+	r.buf[method] = ""
+	r.mu.Unlock()
+	if text != "" {
+		fmt.Print(text)
+	}
 }
 
 func (r *Reporter) appendLog(method, text string) {
@@ -217,6 +194,49 @@ func (r *Reporter) appendLog(method, text string) {
 	}
 	defer f.Close()
 	_, _ = f.WriteString(text)
+}
+
+// render перерисовывает панель НА МЕСТЕ: поднимается вверх и перезаписывает
+// те же строки (никаких новых блоков/сообщений).
+func (r *Reporter) render() {
+	r.outMu.Lock()
+	defer r.outMu.Unlock()
+
+	r.mu.Lock()
+	rows := r.buildRowsLocked()
+	r.mu.Unlock()
+
+	out := new(strings.Builder)
+	if r.drawn && len(rows) > 0 {
+		out.WriteString(fmt.Sprintf("\033[%dA", r.rows))
+	}
+	for _, row := range rows {
+		out.WriteString(row + "\n")
+	}
+	r.drawn = true
+	r.rows = len(rows)
+	fmt.Print(out.String())
+}
+
+func (r *Reporter) buildRowsLocked() []string {
+	now := time.Now().UnixMilli()
+	rows := []string{"=== day_03: запуск стратегий (параллельно) ==="}
+	for _, m := range r.methods {
+		elapsed := int(time.Since(r.started[m]).Seconds())
+		switch r.state[m] {
+		case "run":
+			frame := string(spinnerFrames[(now/int64(frameInterval))%int64(len(spinnerFrames))])
+			rows = append(rows, fmt.Sprintf("● %-11s %s %ds %s", m, frame, elapsed, r.steps[m]))
+		case "done":
+			rows = append(rows, fmt.Sprintf("✓ %-11s %s (%ds)", m, r.detail[m], elapsed))
+		case "error":
+			rows = append(rows, fmt.Sprintf("✗ %-11s %s (%ds)", m, r.detail[m], elapsed))
+		default:
+			rows = append(rows, fmt.Sprintf("○ %-11s ожидание...", m))
+		}
+	}
+	rows = append(rows, fmt.Sprintf("прошло: %s", time.Since(r.repStart).Round(time.Second)))
+	return rows
 }
 
 // resetLogs очищает лог-файлы в каталоге перед новым коллективным прогоном.

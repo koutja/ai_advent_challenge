@@ -52,7 +52,7 @@ func main() {
 	}
 
 	// Одиночные подкоманды: спиннер + счётчик времени, ответ в stdout.
-	rep := newReporterStdout()
+	rep := newReporterStdout(mode)
 	defer rep.finish()
 
 	var runErr error
