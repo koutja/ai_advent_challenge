@@ -1,0 +1,95 @@
+{
+  "groups": {
+    "strong": [
+      {
+        "title": "GPT-5.6 Terra",
+        "id": "gpt-5.6-terra",
+        "provider": "OpenAI",
+        "elo": 1541,
+        "elo_note": "Code Arena score; not confirmed in general text Arena",
+        "sources": ["superintellect.ru"]
+      },
+      {
+        "title": "GPT-5.6 Sol",
+        "id": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "elo": 1509,
+        "sources": ["openlm.ai", "benchlm.ai"]
+      },
+      {
+        "title": "Claude Fable 5",
+        "id": "claude-fable-5",
+        "provider": "Anthropic",
+        "elo": 1507,
+        "elo_note": "Offline since June 12, 2026 due to export restrictions",
+        "sources": ["anotherwrapper.com", "benchlm.ai", "lmmarketcap.com"]
+      },
+      {
+        "title": "Claude Opus 4.6",
+        "id": "claude-opus-4-6",
+        "provider": "Anthropic",
+        "elo": 1503,
+        "sources": ["lmmarketcap.com"]
+      }
+    ],
+    "medium": [
+      {"title": "Gemini 3.1 Pro", "id": "gemini-3.1-pro", "provider": "Google", "elo": 1494, "sources": ["lmmarketcap.com", "awesomeagents.ai"]},
+      {"title": "Claude Opus 5", "id": "claude-opus-5", "provider": "Anthropic", "elo": 1493, "sources": ["benchlm.ai"]},
+      {"title": "Claude Opus 4.7", "id": "claude-opus-4-7", "provider": "Anthropic", "elo": 1491, "sources": ["lmmarketcap.com", "awesomeagents.ai"]},
+      {"title": "Gemini 3.7 Flash", "id": "gemini-3.7-flash", "provider": "Google", "elo": 1490, "sources": ["anotherwrapper.com"]},
+      {"title": "Kimi K3", "id": "kimi-k3", "provider": "Moonshot AI", "elo": 1489, "sources": ["anotherwrapper.com", "benchlm.ai"]},
+      {"title": "GPT-5.4", "id": "gpt-5.4", "provider": "OpenAI", "elo": 1485, "sources": ["lmmarketcap.com"]},
+      {"title": "Qwen3.8 Max", "id": "qwen3.8-max", "provider": "Alibaba", "elo": 1480, "sources": ["lmmarketcap.com", "anotherwrapper.com"]},
+      {"title": "Claude Opus 4.8", "id": "claude-opus-4-8", "provider": "Anthropic", "elo": 1479, "sources": ["lmmarketcap.com", "awesomeagents.ai"]},
+      {"title": "Gemini 3.5 Flash", "id": "gemini-3.5-flash", "provider": "Google", "elo": 1477, "sources": ["lmmarketcap.com"]},
+      {"title": "GPT-5.5", "id": "gpt-5.5", "provider": "OpenAI", "elo": 1475, "sources": ["lmmarketcap.com"]},
+      {"title": "GLM 5.3 Flash", "id": "glm-5.3-flash", "provider": "Zhipu AI", "elo": 1474, "sources": ["lmmarketcap.com"]},
+      {"title": "Grok 4.5", "id": "grok-4.5", "provider": "xAI", "elo": 1471, "sources": ["lmmarketcap.com"]},
+      {"title": "Qwen3.7 Max", "id": "qwen3.7-max", "provider": "Alibaba", "elo": 1470, "sources": ["awesomeagents.ai"]},
+      {"title": "MiMo V2.5 Pro", "id": "mimo-v2.5-pro", "provider": "Xiaomi", "elo": 1468, "sources": ["lmmarketcap.com"]},
+      {"title": "DeepSeek V4 Pro", "id": "deepseek-v4-pro", "provider": "DeepSeek", "elo": 1463, "sources": ["lmmarketcap.com", "awesomeagents.ai"]},
+      {"title": "Claude Sonnet 4.6", "id": "claude-sonnet-4-6", "provider": "Anthropic", "elo": 1460, "sources": ["lmmarketcap.com"]},
+      {"title": "GLM 5.2", "id": "glm-5.2", "provider": "Zhipu AI", "elo": 1458, "sources": ["lmmarketcap.com"]},
+      {"title": "Qwen3.7 Plus", "id": "qwen3.7-plus", "provider": "Alibaba", "elo": 1455, "sources": ["lmmarketcap.com"]},
+      {"title": "Claude Sonnet 4.5", "id": "claude-sonnet-4-5", "provider": "Anthropic", "elo": 1452, "sources": ["lmmarketcap.com"]}
+    ],
+    "weak": [
+      {"title": "MiniMax M3", "id": "minimax-m3", "provider": "MiniMax", "elo": 1443, "sources": ["lmmarketcap.com"]},
+      {"title": "MiMo V2.5", "id": "mimo-v2.5", "provider": "Xiaomi", "elo": 1434, "sources": ["lmmarketcap.com"]},
+      {"title": "GLM 5 Turbo", "id": "glm-5-turbo", "provider": "Zhipu AI", "elo": 1433, "sources": ["lmmarketcap.com"]},
+      {"title": "DeepSeek V4 Flash", "id": "deepseek-v4-flash", "provider": "DeepSeek", "elo": 1433, "sources": ["lmmarketcap.com"]},
+      {"title": "Claude Opus 4.5", "id": "claude-opus-4-5", "provider": "Anthropic", "elo": 1430, "sources": ["lmmarketcap.com"]},
+      {"title": "Claude Haiku 4.5", "id": "claude-haiku-4-5", "provider": "Anthropic", "elo": 1240, "sources": ["lmmarketcap.com"]}
+    ],
+    "unrated": [
+      {"title": "GPT-5.6 Luna", "id": "gpt-5.6-luna", "provider": "OpenAI"},
+      {"title": "GPT-5.4 Mini", "id": "gpt-5.4-mini", "provider": "OpenAI"},
+      {"title": "Claude Sonnet 5", "id": "claude-sonnet-5", "provider": "Anthropic"},
+      {"title": "GLM 5.3", "id": "glm-5.3", "provider": "Zhipu AI"},
+      {"title": "Kimi K2.7 Code", "id": "kimi-k2.7-code", "provider": "Moonshot AI"},
+      {"title": "Gemini 3.6 Flash", "id": "gemini-3.6-flash", "provider": "Google"},
+      {"title": "Grok 4.6", "id": "grok-4.6", "provider": "xAI"},
+      {"title": "Composer 2.5 Fast", "id": "composer-2.5-fast", "provider": "Devika"}
+    ]
+  },
+  "recommended_test_set": {
+    "strong": {
+      "id": "gpt-5.6-sol",
+      "provider": "OpenAI",
+      "elo": 1509,
+      "reason": "Highest confirmed general text Elo in the list"
+    },
+    "medium": {
+      "id": "gpt-5.5",
+      "provider": "OpenAI",
+      "elo": 1475,
+      "reason": "Median strength in medium group"
+    },
+    "weak": {
+      "id": "claude-haiku-4-5",
+      "provider": "Anthropic",
+      "elo": 1240,
+      "reason": "Lowest Elo in the entire list for maximum contrast"
+    }
+  }
+}

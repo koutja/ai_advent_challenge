@@ -46,6 +46,7 @@ KEEP_CAST=1 make record DEMO=day_01/demo/demo.sh   # сохранить пром
 | `day_02`  | Контроль формата ответа: без ограничений vs формат+длина+стоп        | `cd day_02 && make run-free\|run-limited\|run-all` |
 | `day_03`  | Одна задача, 4 способа рассуждения + сравнение                       | `cd day_03 && make run-direct\|run-step\|run-prompt-gen\|run-panel\|run-all` |
 | `day_04`  | Влияние temperature (0 / 0.7 / 1.2) на ответ + выводы                | `cd day_04 && make run\|run-all\|run-single` |
+| `day_05`  | Один запрос на слабой/средней/сильной модели: время, токены, цена    | `cd day_05 && make run-cheap\|run-weak\|run-medium\|run-strong\|run-all` |
 
 > Общий код подключения к API (чтение `.env`, конфигурация, вызов `/chat/completions`)
 > вынесен в переиспользуемый пакет [`llm/`](llm/llm.go:1) и подключается в дни через

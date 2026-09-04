@@ -89,8 +89,53 @@ func (c *Client) Model() string { return c.model }
 // BaseURL возвращает активный базовый URL.
 func (c *Client) BaseURL() string { return c.baseURL }
 
+// NewWithConfig создаёт клиент с явно заданными настройками, минуя чтение .env.
+// Используется, когда нужно переключать модель/эндпоинт/ключ в одном процессе
+// (например, сравнение нескольких моделей в рамках одного прогона).
+func NewWithConfig(baseURL, apiKey, model string) (*Client, error) {
+	if apiKey == "" {
+		return nil, errors.New("не задан api key (NewWithConfig)")
+	}
+	if baseURL == "" {
+		baseURL = DefaultBaseURL
+	}
+	if model == "" {
+		model = DefaultModel
+	}
+	return &Client{
+		apiKey:  apiKey,
+		baseURL: baseURL,
+		model:   model,
+		http:    &http.Client{Timeout: httpTimeout},
+	}, nil
+}
+
 // Chat отправляет сообщения и возвращает текст первого ответа.
 func (c *Client) Chat(messages []Message, opts *Options) (string, error) {
+	res, err := c.ChatResult(messages, opts)
+	if err != nil {
+		return "", err
+	}
+	return res.Text, nil
+}
+
+// Result — результат запроса к API: текст ответа плюс метаданные, нужные для
+// замера скорости и стоимости (модель, статистика токенов, затраченное время).
+type Result struct {
+	Text             string        // текст первого ответа
+	Model            string        // имя модели, на которой получен ответ
+	PromptTokens     int           // токены в запросе
+	CompletionTokens int           // токены в ответе
+	TotalTokens      int           // суммарно
+	Duration         time.Duration // время выполнения запроса (включая сеть)
+}
+
+// ChatResult работает как Chat, но дополнительно возвращает метаданные:
+// модель, статистику токенов (usage) и время ответа. Полезно для расчёта
+// стоимости и сравнения скорости. Если API не вернуло usage, поля токенов
+// заполняются значением -1 (не удалось получить).
+func (c *Client) ChatResult(messages []Message, opts *Options) (*Result, error) {
+	start := time.Now()
 	req := chatRequest{Model: c.model, Messages: toWire(messages)}
 	if opts != nil {
 		if opts.MaxTokens > 0 {
@@ -107,46 +152,67 @@ func (c *Client) Chat(messages []Message, opts *Options) (string, error) {
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("сериализация запроса: %w", err)
+		return nil, fmt.Errorf("сериализация запроса: %w", err)
 	}
 
 	endpoint := strings.TrimRight(c.baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("создание запроса: %w", err)
+		return nil, fmt.Errorf("создание запроса: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("запрос к API: %w", err)
+		return nil, fmt.Errorf("запрос к API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
 	if err != nil {
-		return "", fmt.Errorf("чтение ответа: %w", err)
+		return nil, fmt.Errorf("чтение ответа: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API вернул статус %d: %s", resp.StatusCode, string(data))
+		return nil, fmt.Errorf("API вернул статус %d: %s", resp.StatusCode, string(data))
 	}
 
 	var result chatResponse
 	if err := json.Unmarshal(data, &result); err != nil {
-		return "", fmt.Errorf("разбор ответа: %w", err)
+		return nil, fmt.Errorf("разбор ответа: %w", err)
 	}
 	if result.Error != nil {
-		return "", fmt.Errorf("ошибка API: %s", result.Error.Message)
+		return nil, fmt.Errorf("ошибка API: %s", result.Error.Message)
 	}
 	if len(result.Choices) == 0 {
-		return "", errors.New("нет choices в ответе")
+		return nil, errors.New("нет choices в ответе")
 	}
-	return result.Choices[0].Message.Content, nil
+
+	res := &Result{
+		Model:            c.model,
+		PromptTokens:     -1,
+		CompletionTokens: -1,
+		TotalTokens:      -1,
+		Duration:         time.Since(start),
+	}
+	if result.Usage != nil {
+		res.PromptTokens = result.Usage.PromptTokens
+		res.CompletionTokens = result.Usage.CompletionTokens
+		res.TotalTokens = result.Usage.TotalTokens
+	}
+	res.Text = result.Choices[0].Message.Content
+	return res, nil
 }
 
-// loadEnvCascade загружает .env из рабочей директории и, дополнительно,
-// корневой .env репозитория (заполняет только незаданные ключи).
+// LoadEnvCascade загружает .env из рабочей директории и, дополнительно,
+// корневой .env репозитория (заполняет только незаданные ключи). Автоматически
+// вызывается в New(); нужен явно, когда клиент создаётся через NewWithConfig
+// (например, для сравнения нескольких моделей в одном процессе).
+func LoadEnvCascade() {
+	loadEnvCascade()
+}
+
+// loadEnvCascade — внутренняя реализация каскадной загрузки .env.
 func loadEnvCascade() {
 	// Локальный .env в текущей рабочей директории (например, day_NN/.env).
 	LoadEnv(EnvFile)
@@ -232,9 +298,17 @@ type choice struct {
 
 type chatResponse struct {
 	Choices []choice `json:"choices"`
+	Usage   *usage   `json:"usage,omitempty"`
 	Error   *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+// usage — статистика токенов из ответа API (если провайдер её отдаёт).
+type usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 func toWire(messages []Message) []wireMessage {

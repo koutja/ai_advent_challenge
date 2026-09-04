@@ -47,10 +47,21 @@ cat > "$day/README.md" <<EOF
 TODO: опишите задачу дня, запуск и структуру. См. day_01/README.md как пример.
 EOF
 
+# .gitignore — страховка от случайного коммита бинарника/артефактов дня.
+# Локальный `go build .` без -o создаёт ./$module — это не должно попасть в git.
+cat > "$day/.gitignore" <<EOF
+# Локальный бинарник дня (от 'go build .' без -o) — не коммитить
+/$module
+# Генерируемые артефакты дня (обычно уже покрыты корневым .gitignore)
+bin/
+logs/
+results/
+EOF
+
 echo "Created day scaffold: $day"
 echo "Next:"
 echo "  1) отредактируйте main.go  — логику и флаги режимов;"
 echo "  2) Makefile                — цели запуска режимов;"
 echo "  3) README.md               — описание;"
-echo "Проверка: cd $day && go build ./... && go vet ./..."
+echo "Проверка (без бинарника в корне дня): cd $day && make build && go vet ./..."
 echo "Демо и запись видео (demo/, demo.sh) сделайте сами — см. skill record-demo."
