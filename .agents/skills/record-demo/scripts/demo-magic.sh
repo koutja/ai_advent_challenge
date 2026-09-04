@@ -68,9 +68,14 @@ function usage() {
 ##
 function wait() {
   if [[ "$PROMPT_TIMEOUT" == "0" ]]; then
+    # интерактивно: ждём нажатия Enter
     read -rs
   else
-    read -rst "$PROMPT_TIMEOUT"
+    # автоматически: реальная пауза. НЕ используем `read -rst` — в псевдотерминале
+    # asciinema stdin закрыт, read возвращается мгновенно по EOF, и вся запись
+    # укладывается в ~1 сек -> ролик выглядит «застывшим» после первой секунды.
+    # `sleep` гарантирует реальное время между шагами и корректный тайминг в .cast.
+    sleep "$PROMPT_TIMEOUT"
   fi
 }
 

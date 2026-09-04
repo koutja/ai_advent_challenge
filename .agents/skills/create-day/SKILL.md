@@ -1,14 +1,15 @@
 ---
 name: create-day
-description: "Создание каркаса нового дня day_NN для AI Advent Challenge: Go-модуль с подключением общего пакета llm через replace, Makefile, README и demo.sh. Использовать при старте новой задачи дня, чтобы не дублировать соглашения репозитория."
+description: "Создание каркаса нового дня day_NN для AI Advent Challenge: Go-модуль с подключением общего пакета llm через replace, Makefile, README. Демо и запись видео пользователь делает сам. Использовать при старте новой задачи дня, чтобы не дублировать соглашения репозитория."
 ---
 
 # Skill: create-day
 
 Единый каркас для нового дня репозитория `day_NN`. Позволяет начинать задачу
 сразу с готовой, единообразной структуры, не выясняя каждый раз договорённости
-проекта (подключение `llm`, `.env`, demo). Это уменьшает число уточняющих
-вопросов при старте следующего дня.
+проекта (подключение `llm`, `.env`). Это уменьшает число уточняющих
+вопросов при старте следующего дня. Демо и запись видео агент не делает —
+это задача пользователя.
 
 ## Когда использовать
 
@@ -35,8 +36,8 @@ description: "Создание каркаса нового дня day_NN для 
 4. **Makefile**: цели запуска для каждого режима +
    `build: mkdir -p bin && go build -o bin/llm_client .` — бинарники всегда
    собираются в `day_NN/bin/` (папка уже в `.gitignore`), а не в корень дня.
-5. **`demo/demo.sh`**: через demo-magic, **без `set -e`**, со ссылкой на skill
-   `record-demo`. Видео пишем только по явной просьбе пользователя.
+5. **Демо/видео вне задачи**: `demo/`, `demo.sh` и запись видео агент не создаёт
+   и не запускает — это делает пользователь сам (см. skill `record-demo`).
 6. **Проверка**: в конце обязателен `go build ./...` и `go vet ./...` в каждом
    затронутом модуле (включая `llm`).
 
@@ -49,8 +50,7 @@ make new-day DAY=day_04
 ```
 
 Это вызывает `scripts/new-day.sh`, который создаёт `day_04/` с `go.mod`,
-`Makefile`, `main.go` (скелет на `llm.Client`), `README.md` (заглушку)
-и `demo/demo.sh` (шаблон). Затем:
+`Makefile`, `main.go` (скелет на `llm.Client`) и `README.md` (заглушку). Затем:
 
 ```bash
 cd day_04
@@ -64,8 +64,10 @@ go build ./... && go vet ./...
 3. `day_NN/main.go` — логика дня на базе `templates/main.go.tpl`.
 4. `day_NN/Makefile` — из `templates/Makefile.tpl`, добавить цели запуска режимов.
 5. `day_NN/README.md` — структура папки, переменные, запуск, пример (см. `day_01`).
-6. `day_NN/demo/demo.sh` — из `templates/demo.sh.tpl`, вписать команды.
-7. Собрать и проверить: `go build`/`go vet` для `day_NN` и `llm`.
+6. Собрать и проверить: `go build`/`go vet` для `day_NN` и `llm`.
+
+Демо и запись видео (`demo/`, `demo.sh`, `make record`) агент не выполняет —
+пользователь делает это самостоятельно после завершения дня.
 
 ## Шаблоны
 
@@ -74,7 +76,6 @@ go build ./... && go vet ./...
 | `templates/go.mod.tpl`  | go.mod: module `day_NN` + `require`/`replace` на llm  |
 | `templates/Makefile.tpl`| Makefile: `run`, `build` (с `-o bin/llm_client`)     |
 | `templates/main.go.tpl` | main.go-скелет на `llm.New()` + `client.Chat(...)`     |
-| `templates/demo.sh.tpl` | demo-скрипт через demo-magic, без `set -e`            |
 
 ## Частые ошибки
 
@@ -83,4 +84,3 @@ go build ./... && go vet ./...
 - `go build .` без `-o` или без папки `bin/` — появляется лишний бинарник
   в корне `day_NN/` вместо `day_NN/bin/`. В Makefile всегда
   `mkdir -p bin && go build -o bin/llm_client .`.
-- `set -e` в demo — одна ошибка обрывает запись (правило AGENTS.md).
