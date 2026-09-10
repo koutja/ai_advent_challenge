@@ -1,0 +1,9 @@
+{
+  "history_file": "agent_history.db",
+  "keep_last": 10,
+  "summarize_after": 10,
+  "compress": true,
+  "max_tokens": 0,
+  "web_addr": "127.0.0.1:8080",
+  "web_dir": "web"
+}
