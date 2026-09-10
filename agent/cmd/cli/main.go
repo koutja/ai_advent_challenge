@@ -7,6 +7,7 @@
 package main
 
 import (
+	"aichallenge/llm"
 	"bufio"
 	"flag"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 func main() {
 	cfgPath := flag.String("config", "config.json", "путь к config.json")
 	reset := flag.Bool("reset", false, "сбросить историю перед стартом")
+	stats := flag.Bool("stats", false, "прогнать сравнение токенов: короткий/длинный/переполненный диалог")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -40,6 +42,11 @@ func main() {
 	ag, err := agent.New(cfg, mem)
 	if err != nil {
 		die(err)
+	}
+
+	if *stats {
+		runStats(ag)
+		return
 	}
 
 	fmt.Printf("Агент запущен (модель %s, история: %s).\n", ag.Client().Model(), cfg.HistoryFile)
@@ -74,6 +81,7 @@ func main() {
 			fmt.Printf("ошибка: %v\n", err)
 		} else {
 			fmt.Println(reply.Text)
+			printStats(reply.Stats)
 		}
 		fmt.Print("> ")
 	}
@@ -103,6 +111,24 @@ func clearLine(width int) {
 	fmt.Printf("\r%s\r", strings.Repeat(" ", width))
 }
 
+// printStats выводит метрики токенов и стоимости одного хода.
+func printStats(st *agent.TokenStats) {
+	if st == nil {
+		return
+	}
+	line := fmt.Sprintf("  [токены] история ~%d | запрос %d | ответ %d",
+		st.HistoryTokens, st.RequestTokens, st.ResponseTokens)
+	if st.TotalTokens > 0 {
+		line += fmt.Sprintf(" | всего %d", st.TotalTokens)
+	}
+	if st.CostKnown {
+		line += fmt.Sprintf(" | стоимость $%.6f", st.CostUSD)
+	} else {
+		line += " | стоимость —"
+	}
+	fmt.Println(line)
+}
+
 // printHistory выводит сохранённую в памяти историю диалога перед стартом REPL.
 func printHistory(ag *agent.Agent) {
 	hist, err := ag.Memory().Load()
@@ -117,6 +143,55 @@ func printHistory(ag *agent.Agent) {
 		fmt.Printf("%s: %s\n", who, m.Content)
 	}
 	fmt.Println("---")
+}
+
+// runStats прогоняет три сценария (короткий/длинный/переполненный диалог) против
+// реальной модели и печатает таблицу: как растут токены/стоимость по мере диалога
+// и что происходит при превышении лимита (маленький max_tokens / огромная история).
+func runStats(ag *agent.Agent) {
+	short := []llm.Message{{Role: "user", Content: "Привет! Коротко: что такое тест?"}}
+	long := buildDialog(24, 120)     // ~длинный диалог
+	overflow := buildDialog(60, 400) // очень длинная история, давим на контекст
+
+	scenarios := []struct {
+		name string
+		msgs []llm.Message
+		opts *llm.Options
+	}{
+		{"короткий", short, nil},
+		{"длинный", long, &llm.Options{MaxTokens: 64}},
+		{"переполненный", overflow, &llm.Options{MaxTokens: 8}}, // жёсткий лимит вывода + большая история
+	}
+
+	fmt.Println("\n=== Сравнение токенов: короткий / длинный / переполненный ===")
+	for _, s := range scenarios {
+		histT := agent.MessagesTokens(s.msgs)
+		res, err := ag.Client().ChatResult(s.msgs, s.opts)
+		if err != nil {
+			fmt.Printf("%-14s история ~%-7d статус: ОШИБКА — %v\n", s.name, histT, err)
+			continue
+		}
+		costLine := "—"
+		if p, ok := ag.Prices()[res.Model]; ok {
+			costLine = fmt.Sprintf("$%.6f", agent.Cost(p, res.PromptTokens, res.CompletionTokens))
+		}
+		fmt.Printf("%-14s история ~%-7d запрос %-6d ответ %-6d всего %-6d стоимость %s\n",
+			s.name, histT, res.PromptTokens, res.CompletionTokens, res.TotalTokens, costLine)
+	}
+	fmt.Println()
+}
+
+// buildDialog строит фиктивный диалог из turns реплик по ~words слов каждая.
+func buildDialog(turns, words int) []llm.Message {
+	part := strings.Repeat("слово ", words)
+	var msgs []llm.Message
+	for i := 0; i < turns; i++ {
+		msgs = append(msgs,
+			llm.Message{Role: "user", Content: part},
+			llm.Message{Role: "assistant", Content: part},
+		)
+	}
+	return msgs
 }
 
 func die(err error) {

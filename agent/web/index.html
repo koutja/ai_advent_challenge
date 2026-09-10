@@ -4,30 +4,78 @@
   <meta charset="utf-8">
   <title>Агент</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
-    #log { border: 1px solid #ccc; border-radius: 8px; padding: .8rem; height: 60vh; overflow-y: auto; background: #fafafa; }
-    .msg { margin: .4rem 0; white-space: pre-wrap; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+    header { padding: 1rem 1.5rem; background: #fff; border-bottom: 1px solid #e3e6ea; }
+    header h1 { margin: 0; font-size: 1.25rem; }
+    .layout { display: flex; gap: 1rem; padding: 1rem 1.5rem; align-items: flex-start; }
+    #chat { flex: 1 1 72%; min-width: 0; }
+    #log { border: 1px solid #e3e6ea; border-radius: 10px; padding: .8rem; height: 70vh; overflow-y: auto; background: #fff; }
+    .msg { margin: .5rem 0; white-space: pre-wrap; }
     .user { color: #1a73e8; }
-    .assistant { color: #333; }
+    .assistant { color: #222; }
     .typing { color: #999; font-style: italic; margin: .4rem 0; }
-    .meta { font-size: .75rem; color: #888; }
     form { display: flex; gap: .5rem; margin-top: .8rem; }
-    input { flex: 1; padding: .5rem; }
-    button { padding: .5rem 1rem; }
+    input { flex: 1; padding: .5rem; border: 1px solid #ccc; border-radius: 6px; }
+    button { padding: .5rem 1.1rem; border: 0; border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
+    #stats { flex: 0 0 320px; background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 1rem; }
+    #stats h2 { margin: 0 0 .8rem; font-size: 1rem; }
+    .empty { color: #999; font-size: .9rem; }
+    .metric { margin: .7rem 0; }
+    .metric .label { display: flex; justify-content: space-between; font-size: .85rem; color: #555; margin-bottom: .25rem; }
+    .bar { height: 8px; background: #eef0f3; border-radius: 4px; overflow: hidden; }
+    .bar > span { display: block; height: 100%; width: 0; background: #4c8bf5; transition: width .3s; }
+    .totals { margin-top: 1rem; border-top: 1px solid #eef0f3; padding-top: .6rem; font-size: .9rem; }
+    .totals div { display: flex; justify-content: space-between; margin: .3rem 0; }
+    .totals .sec { font-weight: 600; border-bottom: 1px solid #eef0f3; margin-top: .5rem; }
   </style>
 </head>
 <body>
-  <h1>Агент</h1>
-  <div id="log"></div>
-  <form id="form">
-    <input id="msg" type="text" placeholder="Сообщение..." autofocus>
-    <button type="submit">Отправить</button>
-  </form>
+  <header><h1>Агент</h1></header>
+  <div class="layout">
+    <div id="chat">
+      <div id="log"></div>
+      <form id="form">
+        <input id="msg" type="text" placeholder="Сообщение..." autofocus>
+        <button type="submit">Отправить</button>
+      </form>
+    </div>
+    <aside id="stats">
+      <h2>Статистика токенов</h2>
+      <div id="statsEmpty" class="empty">Пока нет данных. Отправьте сообщение.</div>
+      <div id="statsBody" style="display:none">
+        <div class="metric">
+          <div class="label"><span>История</span><span id="mHistory">0</span></div>
+          <div class="bar"><span id="bHistory"></span></div>
+        </div>
+        <div class="metric">
+          <div class="label"><span>Запрос (prompt)</span><span id="mRequest">0</span></div>
+          <div class="bar"><span id="bRequest"></span></div>
+        </div>
+        <div class="metric">
+          <div class="label"><span>Ответ (completion)</span><span id="mResponse">0</span></div>
+          <div class="bar"><span id="bResponse"></span></div>
+        </div>
+        <div class="totals">
+          <div class="sec">Последний ответ</div>
+          <div><span>Всего токенов</span><span id="mTotal">0</span></div>
+          <div><span>Стоимость</span><span id="mCost">—</span></div>
+          <div><span>Модель</span><span id="mModel">—</span></div>
+          <div class="sec">За сессию</div>
+          <div><span>Запрос</span><span id="sRequest">0</span></div>
+          <div><span>Ответ</span><span id="sResponse">0</span></div>
+          <div><span>Стоимость</span><span id="sCost">$0.000000</span></div>
+        </div>
+      </div>
+    </aside>
+  </div>
 
   <script>
     const log = document.getElementById('log');
     const form = document.getElementById('form');
     const input = document.getElementById('msg');
+    let typingEl = null;
+    let session = { req: 0, resp: 0, cost: 0 };
 
     function add(role, text) {
       const div = document.createElement('div');
@@ -37,7 +85,6 @@
       log.scrollTop = log.scrollHeight;
     }
 
-    let typingEl = null;
     function showTyping() {
       if (typingEl) return;
       typingEl = document.createElement('div');
@@ -48,6 +95,44 @@
     }
     function hideTyping() {
       if (typingEl) { typingEl.remove(); typingEl = null; }
+    }
+
+    function setBar(id, val, max) {
+      const pct = max > 0 ? Math.min(100, val / max * 100) : 0;
+      document.getElementById(id).style.width = pct + '%';
+    }
+
+    // Обновляет панель статистики данными последнего ответа.
+    function renderStats(st) {
+      const empty = document.getElementById('statsEmpty');
+      const body = document.getElementById('statsBody');
+      if (!st) { empty.style.display = 'block'; body.style.display = 'none'; return; }
+      empty.style.display = 'none';
+      body.style.display = 'block';
+
+      const hist = st.history_tokens || 0;
+      const req = st.request_tokens || 0;
+      const resp = st.response_tokens || 0;
+      const max = Math.max(hist, req, resp, 1);
+
+      document.getElementById('mHistory').textContent = '~' + hist;
+      document.getElementById('mRequest').textContent = req;
+      document.getElementById('mResponse').textContent = resp;
+      document.getElementById('mTotal').textContent = req + resp;
+      document.getElementById('mModel').textContent = st.model || '—';
+      document.getElementById('mCost').textContent =
+        st.cost_known ? '$' + st.cost_usd.toFixed(6) : '—';
+
+      setBar('bHistory', hist, max);
+      setBar('bRequest', req, max);
+      setBar('bResponse', resp, max);
+
+      session.req += req;
+      session.resp += resp;
+      if (st.cost_known) session.cost += st.cost_usd || 0;
+      document.getElementById('sRequest').textContent = session.req;
+      document.getElementById('sResponse').textContent = session.resp;
+      document.getElementById('sCost').textContent = '$' + session.cost.toFixed(6);
     }
 
     // Показываем сохранённую историю при загрузке страницы (после перезапуска).
@@ -78,14 +163,7 @@
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
         add('assistant', data.reply);
-        if (data.usage) {
-          const meta = document.createElement('div');
-          meta.className = 'meta';
-          meta.textContent = 'токены: ' + data.usage.total_tokens +
-            ' (запрос ' + data.usage.prompt_tokens +
-            ', ответ ' + data.usage.completion_tokens + ')';
-          log.appendChild(meta);
-        }
+        renderStats(data.stats);
       } catch (err) {
         hideTyping();
         add('assistant', '[ошибка] ' + err.message);

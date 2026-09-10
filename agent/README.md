@@ -21,11 +21,12 @@ agent/
 ## Команды
 
 ```bash
-go run ./cmd/cli      # консольный чат (REPL)
-go run ./cmd/web      # web-чат: http://127.0.0.1:8080
-make build            # собрать bin/agent_cli и bin/agent_web
-make test             # прогнать тесты (SQLite-память)
-make reset-history    # удалить agent_history.db (сброс истории)
+go run ./cmd/cli           # консольный чат (REPL)
+go run ./cmd/cli --stats   # сравнение токенов: короткий/длинный/переполненный (Этап 3)
+go run ./cmd/web           # web-чат: http://127.0.0.1:8080
+make build                 # собрать bin/agent_cli и bin/agent_web
+make test                  # прогнать тесты (память + токены)
+make reset-history         # удалить agent_history.db (сброс истории)
 ```
 
 ## Настройка (куда идут запросы и ключи)
@@ -55,7 +56,7 @@ LLM_API_KEY=sk-...
 
 1. **Первый агент** — ядро + CLI + web, память в RAM.
 2. **Сохранение контекста** — история в SQLite через интерфейс `Memory`.
-3. **Работа с токенами** — учёт токенов/стоимости и поведение при переполнении.
+3. **Работа с токенами** — оценка токенов, стоимость из `llm/models.json`, режим `--stats`.
 4. **Сжатие истории** — `ContextManager`: summary + последние N сообщений.
 
 Подробнее — [`../plans/agent-week-plan.md`](../plans/agent-week-plan.md).

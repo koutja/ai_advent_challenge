@@ -32,18 +32,36 @@ type usageView struct {
 	TotalTokens      int `json:"total_tokens,omitempty"`
 }
 
+type statsView struct {
+	Model          string  `json:"model,omitempty"`
+	HistoryTokens  int     `json:"history_tokens,omitempty"`
+	RequestTokens  int     `json:"request_tokens,omitempty"`
+	ResponseTokens int     `json:"response_tokens,omitempty"`
+	CostUSD        float64 `json:"cost_usd,omitempty"`
+	CostKnown      bool    `json:"cost_known,omitempty"`
+}
+
 type chatResp struct {
 	Reply string     `json:"reply"`
 	Usage *usageView `json:"usage,omitempty"`
+	Stats *statsView `json:"stats,omitempty"`
 }
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "путь к config.json")
+	addr := flag.String("addr", "", "адрес веб-сервера (по умолчанию — из config.json)")
+	webDir := flag.String("web-dir", "", "папка со статикой (по умолчанию — из config.json)")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
 	if err != nil {
 		die(err)
+	}
+	if *addr == "" {
+		*addr = cfg.WebAddr
+	}
+	if *webDir == "" {
+		*webDir = cfg.WebDir
 	}
 
 	// Этап 2: история сохраняется в SQLite (cfg.HistoryFile) и переживает перезапуск.
@@ -60,10 +78,10 @@ func main() {
 
 	http.HandleFunc("/chat", handleChat)
 	http.HandleFunc("/history", handleHistory)
-	http.Handle("/", http.FileServer(http.Dir(cfg.WebDir)))
+	http.Handle("/", http.FileServer(http.Dir(*webDir)))
 
-	fmt.Printf("Web-интерфейс агента: http://%s\n", cfg.WebAddr)
-	log.Fatal(http.ListenAndServe(cfg.WebAddr, nil))
+	fmt.Printf("Web-интерфейс агента: http://%s\n", *addr)
+	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
 func handleChat(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +107,16 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 			PromptTokens:     reply.Usage.PromptTokens,
 			CompletionTokens: reply.Usage.CompletionTokens,
 			TotalTokens:      reply.Usage.TotalTokens,
+		}
+	}
+	if reply.Stats != nil {
+		resp.Stats = &statsView{
+			Model:          reply.Stats.Model,
+			HistoryTokens:  reply.Stats.HistoryTokens,
+			RequestTokens:  reply.Stats.RequestTokens,
+			ResponseTokens: reply.Stats.ResponseTokens,
+			CostUSD:        reply.Stats.CostUSD,
+			CostKnown:      reply.Stats.CostKnown,
 		}
 	}
 
