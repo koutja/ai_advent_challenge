@@ -1,4 +1,4 @@
-.PHONY: run run-web build reset-history demo
+.PHONY: run run-web build test reset-history demo
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -13,6 +13,10 @@ build:
 	mkdir -p bin
 	go build -o bin/agent_cli ./cmd/cli
 	go build -o bin/agent_web ./cmd/web
+
+# ===== Тесты =====
+test:
+	go test ./...
 
 # ===== Сброс истории (удаление файла SQLite, Этап 2) =====
 reset-history:

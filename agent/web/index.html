@@ -9,6 +9,7 @@
     .msg { margin: .4rem 0; white-space: pre-wrap; }
     .user { color: #1a73e8; }
     .assistant { color: #333; }
+    .typing { color: #999; font-style: italic; margin: .4rem 0; }
     .meta { font-size: .75rem; color: #888; }
     form { display: flex; gap: .5rem; margin-top: .8rem; }
     input { flex: 1; padding: .5rem; }
@@ -36,18 +37,44 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    let typingEl = null;
+    function showTyping() {
+      if (typingEl) return;
+      typingEl = document.createElement('div');
+      typingEl.className = 'typing';
+      typingEl.textContent = 'Агент печатает…';
+      log.appendChild(typingEl);
+      log.scrollTop = log.scrollHeight;
+    }
+    function hideTyping() {
+      if (typingEl) { typingEl.remove(); typingEl = null; }
+    }
+
+    // Показываем сохранённую историю при загрузке страницы (после перезапуска).
+    async function loadHistory() {
+      try {
+        const resp = await fetch('/history');
+        if (!resp.ok) return;
+        const msgs = await resp.json();
+        for (const m of msgs) add(m.role === 'user' ? 'user' : 'assistant', m.content);
+      } catch (err) { /* игнорируем */ }
+    }
+    loadHistory();
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const text = input.value.trim();
       if (!text) return;
       input.value = '';
       add('user', text);
+      showTyping();
       try {
         const resp = await fetch('/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: text }),
         });
+        hideTyping();
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
         add('assistant', data.reply);
@@ -60,6 +87,7 @@
           log.appendChild(meta);
         }
       } catch (err) {
+        hideTyping();
         add('assistant', '[ошибка] ' + err.message);
       }
     });

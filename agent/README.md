@@ -24,7 +24,8 @@ agent/
 go run ./cmd/cli      # консольный чат (REPL)
 go run ./cmd/web      # web-чат: http://127.0.0.1:8080
 make build            # собрать bin/agent_cli и bin/agent_web
-make reset-history    # сбросить историю (Этап 2)
+make test             # прогнать тесты (SQLite-память)
+make reset-history    # удалить agent_history.db (сброс истории)
 ```
 
 ## Настройка (куда идут запросы и ключи)

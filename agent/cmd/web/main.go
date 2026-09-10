@@ -46,13 +46,20 @@ func main() {
 		die(err)
 	}
 
-	mem := agent.NewInMemory() // Этап 1: память в RAM; на Этапе 2 заменим на SQLite
+	// Этап 2: история сохраняется в SQLite (cfg.HistoryFile) и переживает перезапуск.
+	mem, err := agent.NewSQLiteMemory(cfg.HistoryFile)
+	if err != nil {
+		die(err)
+	}
+	defer mem.Close()
+
 	ag, err = agent.New(cfg, mem)
 	if err != nil {
 		die(err)
 	}
 
 	http.HandleFunc("/chat", handleChat)
+	http.HandleFunc("/history", handleHistory)
 	http.Handle("/", http.FileServer(http.Dir(cfg.WebDir)))
 
 	fmt.Printf("Web-интерфейс агента: http://%s\n", cfg.WebAddr)
@@ -87,6 +94,30 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleHistory возвращает всю сохранённую историю диалога в JSON-виде,
+// чтобы страница могла показать её при загрузке (после перезапуска сервера).
+func handleHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "ожидается GET", http.StatusMethodNotAllowed)
+		return
+	}
+	hist, err := ag.Memory().Load()
+	if err != nil {
+		http.Error(w, "ошибка чтения истории: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type histMsg struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	msgs := make([]histMsg, 0, len(hist))
+	for _, m := range hist {
+		msgs = append(msgs, histMsg{Role: m.Role, Content: m.Content})
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(msgs)
 }
 
 func die(err error) {

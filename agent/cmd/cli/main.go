@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"agent"
 )
@@ -26,7 +27,12 @@ func main() {
 		die(err)
 	}
 
-	mem := agent.NewInMemory() // Этап 1: память в RAM; на Этапе 2 заменим на SQLite
+	// Этап 2: история сохраняется в SQLite (cfg.HistoryFile) и переживает перезапуск.
+	mem, err := agent.NewSQLiteMemory(cfg.HistoryFile)
+	if err != nil {
+		die(err)
+	}
+	defer mem.Close()
 	if *reset {
 		_ = mem.Reset()
 	}
@@ -36,9 +42,10 @@ func main() {
 		die(err)
 	}
 
-	fmt.Printf("Агент запущен (модель %s). Введите сообщение или /exit.\n", ag.Client().Model())
+	fmt.Printf("Агент запущен (модель %s, история: %s).\n", ag.Client().Model(), cfg.HistoryFile)
 	fmt.Println("Команды: /reset — очистить историю, /exit — выход.")
 
+	printHistory(ag)
 	sc := bufio.NewScanner(os.Stdin)
 	fmt.Print("> ")
 	for sc.Scan() {
@@ -56,7 +63,13 @@ func main() {
 			fmt.Print("> ")
 			continue
 		}
+		// Показываем, что LLM готовит ответ (спиннер на той же строке).
+		stop := make(chan struct{})
+		go spin(stop)
 		reply, err := ag.Say(line)
+		close(stop)
+		clearLine(40)
+
 		if err != nil {
 			fmt.Printf("ошибка: %v\n", err)
 		} else {
@@ -67,6 +80,43 @@ func main() {
 	if err := sc.Err(); err != nil {
 		die(err)
 	}
+}
+
+// spin рисует индикатор «Агент думает <спиннер>», пока канал stop не закрыт.
+func spin(stop <-chan struct{}) {
+	frames := []string{"|", "/", "-", "\\"}
+	i := 0
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		fmt.Printf("\rАгент думает %s", frames[i%len(frames)])
+		i++
+		time.Sleep(120 * time.Millisecond)
+	}
+}
+
+// clearLine затирает текущую строку консоли, чтобы убрать спиннер.
+func clearLine(width int) {
+	fmt.Printf("\r%s\r", strings.Repeat(" ", width))
+}
+
+// printHistory выводит сохранённую в памяти историю диалога перед стартом REPL.
+func printHistory(ag *agent.Agent) {
+	hist, err := ag.Memory().Load()
+	if err != nil || len(hist) == 0 {
+		return
+	}
+	for _, m := range hist {
+		who := "Агент"
+		if m.Role == "user" {
+			who = "Вы"
+		}
+		fmt.Printf("%s: %s\n", who, m.Content)
+	}
+	fmt.Println("---")
 }
 
 func die(err error) {
