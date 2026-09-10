@@ -36,3 +36,6 @@
 **/results/
 **/bin/
 day_*/day_*
+
+# SQLite-базы day_* и agent (сгенерированные артефакты)
+**/*.db
