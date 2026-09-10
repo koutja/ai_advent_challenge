@@ -24,22 +24,24 @@ type TierCfg struct {
 	Note    string `json:"note,omitempty"`
 }
 
-// Config — runtime-настройки дня: имена env-переменных для endpoint/ключа, цены
-// по моделям и список тиров. Загружается из config.json.
+// Config — runtime-настройки дня: имена env-переменных для endpoint/ключа и
+// список тиров. Загружается из config.json. Цены на модели берутся не отсюда,
+// а из общего каталога ../llm/models.json.
 type Config struct {
-	DefaultQuery string           `json:"default_query"`
-	BaseURL      string           `json:"base_url"` // имя env-переменной с URL (напр. "LLM_BASE_URL")
-	EnvKey       string           `json:"env_key"`  // имя env-переменной с API-ключом (напр. "LLM_API_KEY")
-	Prices       map[string]Price `json:"prices_usd_per_mtok"`
-	Tiers        []TierCfg        `json:"tiers"`
+	DefaultQuery string    `json:"default_query"`
+	BaseURL      string    `json:"base_url"` // имя env-переменной с URL (напр. "LLM_BASE_URL")
+	EnvKey       string    `json:"env_key"`  // имя env-переменной с API-ключом (напр. "LLM_API_KEY")
+	Tiers        []TierCfg `json:"tiers"`
 }
 
-// ModelEntry — модель из каталога llm/models.json (поле title + id + метаданные).
+// ModelEntry — модель из каталога llm/models.json (поле title + id + метаданные
+// + цена за миллион токенов, если известна).
 type ModelEntry struct {
 	Title    string `json:"title"`
 	ID       string `json:"id"`
 	Provider string `json:"provider"`
 	Elo      int    `json:"elo"`
+	Price    Price  `json:"price_usd_per_mtok,omitempty"`
 	Group    string // проставляется при загрузке, в JSON его нет
 }
 
@@ -80,8 +82,12 @@ func loadCatalog(path string) (map[string]ModelEntry, error) {
 	return out, nil
 }
 
-// priceFor возвращает цену модели, если она задана в конфиге.
-func (c *Config) priceFor(modelID string) (Price, bool) {
-	p, ok := c.Prices[modelID]
-	return p, ok
+// priceFor возвращает цену модели из каталога, если она известна.
+// Каталог загружается один раз в main и передаётся как cat.
+func priceFor(cat map[string]ModelEntry, modelID string) (Price, bool) {
+	m, ok := cat[modelID]
+	if !ok {
+		return Price{}, false
+	}
+	return m.Price, m.Price.Input > 0
 }

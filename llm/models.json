@@ -14,6 +14,7 @@
         "id": "gpt-5.6-sol",
         "provider": "OpenAI",
         "elo": 1509,
+        "price_usd_per_mtok": { "input": 5.00, "output": 30.00 },
         "sources": ["openlm.ai", "benchlm.ai"]
       },
       {
@@ -47,7 +48,7 @@
       {"title": "Grok 4.5", "id": "grok-4.5", "provider": "xAI", "elo": 1471, "sources": ["lmmarketcap.com"]},
       {"title": "Qwen3.7 Max", "id": "qwen3.7-max", "provider": "Alibaba", "elo": 1470, "sources": ["awesomeagents.ai"]},
       {"title": "MiMo V2.5 Pro", "id": "mimo-v2.5-pro", "provider": "Xiaomi", "elo": 1468, "sources": ["lmmarketcap.com"]},
-      {"title": "DeepSeek V4 Pro", "id": "deepseek-v4-pro", "provider": "DeepSeek", "elo": 1463, "sources": ["lmmarketcap.com", "awesomeagents.ai"]},
+      {"title": "DeepSeek V4 Pro", "id": "deepseek-v4-pro", "provider": "DeepSeek", "elo": 1463, "price_usd_per_mtok": { "input": 0.27, "output": 1.10 }, "sources": ["lmmarketcap.com", "awesomeagents.ai"]},
       {"title": "Claude Sonnet 4.6", "id": "claude-sonnet-4-6", "provider": "Anthropic", "elo": 1460, "sources": ["lmmarketcap.com"]},
       {"title": "GLM 5.2", "id": "glm-5.2", "provider": "Zhipu AI", "elo": 1458, "sources": ["lmmarketcap.com"]},
       {"title": "Qwen3.7 Plus", "id": "qwen3.7-plus", "provider": "Alibaba", "elo": 1455, "sources": ["lmmarketcap.com"]},
@@ -57,7 +58,7 @@
       {"title": "MiniMax M3", "id": "minimax-m3", "provider": "MiniMax", "elo": 1443, "sources": ["lmmarketcap.com"]},
       {"title": "MiMo V2.5", "id": "mimo-v2.5", "provider": "Xiaomi", "elo": 1434, "sources": ["lmmarketcap.com"]},
       {"title": "GLM 5 Turbo", "id": "glm-5-turbo", "provider": "Zhipu AI", "elo": 1433, "sources": ["lmmarketcap.com"]},
-      {"title": "DeepSeek V4 Flash", "id": "deepseek-v4-flash", "provider": "DeepSeek", "elo": 1433, "sources": ["lmmarketcap.com"]},
+      {"title": "DeepSeek V4 Flash", "id": "deepseek-v4-flash", "provider": "DeepSeek", "elo": 1433, "price_usd_per_mtok": { "input": 0.07, "output": 0.28 }, "sources": ["lmmarketcap.com"]},
       {"title": "Claude Opus 4.5", "id": "claude-opus-4-5", "provider": "Anthropic", "elo": 1430, "sources": ["lmmarketcap.com"]},
       {"title": "Claude Haiku 4.5", "id": "claude-haiku-4-5", "provider": "Anthropic", "elo": 1240, "sources": ["lmmarketcap.com"]}
     ],

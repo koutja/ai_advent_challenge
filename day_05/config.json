@@ -2,11 +2,6 @@
   "default_query": "Объясни простыми словами, что такое рекурсия, и приведи короткий пример на любом языке программирования.",
   "base_url": "LLM_BASE_URL",
   "env_key": "LLM_API_KEY",
-  "prices_usd_per_mtok": {
-    "deepseek-v4-flash": { "input": 0.07, "output": 0.28 },
-    "deepseek-v4-pro":   { "input": 0.27, "output": 1.10 },
-    "gpt-5.6-sol": { "input": 5.00, "output": 30.00 }
-  },
   "tiers": [
     {
       "name": "weak",

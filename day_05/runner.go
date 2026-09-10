@@ -128,7 +128,7 @@ func runTier(cfg *Config, t TierCfg, cat map[string]ModelEntry, query string) *T
 	res.TotalTokens = out.TotalTokens
 	res.Text = out.Text
 
-	if p, ok := cfg.priceFor(t.ID); ok {
+	if p, ok := priceFor(cat, t.ID); ok {
 		pt, ct := out.PromptTokens, out.CompletionTokens
 		if pt < 0 {
 			pt = 0
