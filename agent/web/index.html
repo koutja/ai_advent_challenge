@@ -8,13 +8,23 @@
     body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
     header { padding: 1rem 1.5rem; background: #fff; border-bottom: 1px solid #e3e6ea; }
     header h1 { margin: 0; font-size: 1.25rem; }
+    .toolbar { display: flex; gap: .6rem; align-items: center; padding: .6rem 1.5rem; background: #fff; border-bottom: 1px solid #e3e6ea; flex-wrap: wrap; }
+    .toolbar label { font-size: .85rem; color: #555; }
+    select { padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+    .status { font-size: .85rem; color: #666; }
     .layout { display: flex; gap: 1rem; padding: 1rem 1.5rem; align-items: flex-start; }
     #chat { flex: 1 1 72%; min-width: 0; }
-    #log { border: 1px solid #e3e6ea; border-radius: 10px; padding: .8rem; height: 70vh; overflow-y: auto; background: #fff; }
+    #log { border: 1px solid #e3e6ea; border-radius: 10px; padding: .8rem; height: 66vh; overflow-y: auto; background: #fff; }
     .msg { margin: .5rem 0; white-space: pre-wrap; }
     .user { color: #1a73e8; }
     .assistant { color: #222; }
     .typing { color: #999; font-style: italic; margin: .4rem 0; }
+    .hint { font-size: .78rem; color: #999; margin: .4rem 0; }
+    /* Лог стратегии в ленте чата */
+    .strat-event { margin: .15rem 0 .15rem 1.2rem; padding: .1rem .4rem; font-size: .78rem; color: #6b7280; background: #f6f8fb; border-left: 3px solid #dbe2ee; border-radius: 0 6px 6px 0; white-space: pre-wrap; animation: fadeIn .2s ease; }
+    .strat-event.warn { color: #b45309; border-left-color: #f59e0b; background: #fff8ef; }
+    .strat-event.predict { color: #1a73e8; font-weight: 600; border-left-color: #1a73e8; background: #f0f5ff; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
     form { display: flex; gap: .5rem; margin-top: .8rem; }
     input { flex: 1; padding: .5rem; border: 1px solid #ccc; border-radius: 6px; }
     button { padding: .5rem 1.1rem; border: 0; border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
@@ -32,13 +42,36 @@
     .totals { margin-top: 1rem; border-top: 1px solid #eef0f3; padding-top: .6rem; font-size: .9rem; }
     .totals div { display: flex; justify-content: space-between; margin: .3rem 0; }
     .totals .sec { font-weight: 600; border-bottom: 1px solid #eef0f3; margin-top: .5rem; }
+    /* Toasts */
+    #toasts { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
+    .toast { background: #fff; border: 1px solid #e3e6ea; border-left: 4px solid #1a73e8; border-radius: 8px; padding: .6rem .8rem; box-shadow: 0 4px 12px rgba(0,0,0,.08); font-size: .85rem; display: flex; gap: .6rem; align-items: flex-start; animation: toastIn .25s ease; }
+    .toast.error { border-left-color: #e5484d; }
+    .toast.warn { border-left-color: #f5a623; }
+    .toast.success { border-left-color: #2e9e44; }
+    .toast-close { cursor: pointer; color: #999; margin-left: auto; font-weight: 700; }
+    @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
   </style>
 </head>
 <body>
   <header><h1>Агент</h1></header>
+
+  <div class="toolbar">
+    <label for="strategySelect">Стратегия контекста:</label>
+    <select id="strategySelect">
+      <option value="window">window — скользящее окно</option>
+      <option value="facts">facts — факты (key-value)</option>
+      <option value="branch">branch — ветвление</option>
+    </select>
+    <button id="applyStrategy" type="button">Применить</button>
+    <span id="strategyStatus" class="status"></span>
+    <span style="flex:1"></span>
+    <button id="newDialog" type="button">＋ Новый диалог</button>
+  </div>
+
   <div class="layout">
     <div id="chat">
       <div id="log"></div>
+      <div class="hint">🔎 Живой лог стратегии появляется в чате по мере ответа: делаю · ⚠ внимание · ⏳ скоро.</div>
       <form id="form">
         <input id="msg" type="text" placeholder="Сообщение..." autofocus>
         <button type="submit">Отправить</button>
@@ -79,18 +112,56 @@
     </aside>
   </div>
 
+  <div id="toasts"></div>
+
   <script>
     const log = document.getElementById('log');
     const form = document.getElementById('form');
     const input = document.getElementById('msg');
+    const sel = document.getElementById('strategySelect');
+    const applyBtn = document.getElementById('applyStrategy');
+    const newBtn = document.getElementById('newDialog');
+    const stratStatus = document.getElementById('strategyStatus');
     let typingEl = null;
     let session = { req: 0, resp: 0, cost: 0 };
+
+    // ---- Toasts ----
+    function showToast(message, type, duration) {
+      type = type || 'info';
+      duration = duration || (type === 'error' ? 8000 : 4000);
+      const wrap = document.getElementById('toasts');
+      const el = document.createElement('div');
+      el.className = 'toast ' + type;
+      const span = document.createElement('span');
+      span.textContent = message;
+      const close = document.createElement('span');
+      close.className = 'toast-close';
+      close.textContent = '×';
+      close.onclick = () => el.remove();
+      el.appendChild(span);
+      el.appendChild(close);
+      wrap.appendChild(el);
+      setTimeout(() => { if (el.parentNode) el.remove(); }, duration);
+    }
 
     function add(role, text) {
       const div = document.createElement('div');
       div.className = 'msg ' + role;
       div.textContent = (role === 'user' ? 'Вы: ' : 'Агент: ') + text;
       log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    // Добавляет лог-события стратегии в ленту чата.
+    function addEvents(events) {
+      if (!events || !events.length) return;
+      const icons = { log: '🔎', warn: '⚠️', predict: '⏳' };
+      for (const ev of events) {
+        const div = document.createElement('div');
+        div.className = 'strat-event ' + (ev.kind || 'log');
+        div.textContent = (icons[ev.kind] || '·') + ' ' + (ev.text || '');
+        log.appendChild(div);
+      }
       log.scrollTop = log.scrollHeight;
     }
 
@@ -111,7 +182,6 @@
       document.getElementById(id).style.width = pct + '%';
     }
 
-    // Обновляет панель статистики данными последнего ответа.
     function renderStats(st) {
       const empty = document.getElementById('statsEmpty');
       const body = document.getElementById('statsBody');
@@ -136,7 +206,6 @@
       setBar('bRequest', req, max);
       setBar('bResponse', resp, max);
 
-      // Контекст: заполнение окна модели последним запросом (prompt).
       const win = st.context_window || 0;
       const ctx = document.getElementById('ctxBlock');
       const bCtx = document.getElementById('bContext');
@@ -161,14 +230,71 @@
       document.getElementById('sCost').textContent = '$' + session.cost.toFixed(6);
     }
 
-    // Показывает предупреждение, если ошибка похожа на переполнение контекста.
     function showOverflow(msg) {
       const box = document.getElementById('overflowBox');
       const isOverflow = /context|токенов|token|maximum|лимит|превыш|length/i.test(msg || '');
       box.style.display = isOverflow ? 'block' : 'none';
     }
 
-    // Показываем сохранённую историю при загрузке страницы (после перезапуска).
+    // ---- Стратегии ----
+    function label(name) { return name || 'legacy/off'; }
+
+    async function loadStrategy() {
+      try {
+        const resp = await fetch('/strategy');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.current && [...sel.options].some(o => o.value === data.current)) {
+          sel.value = data.current;
+        }
+        stratStatus.textContent = 'текущая: ' + label(data.current);
+      } catch (e) { /* игнорируем */ }
+    }
+
+    async function applyStrategy() {
+      const s = sel.value;
+      stratStatus.textContent = 'переключение…';
+      try {
+        const resp = await fetch('/strategy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strategy: s }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        stratStatus.textContent = 'текущая: ' + label(data.current);
+        showToast('Стратегия переключена на «' + label(data.current) + '»', 'success');
+      } catch (err) {
+        const msg = 'не удалось переключить стратегию: ' + String(err && err.message || err);
+        stratStatus.textContent = 'ошибка: ' + msg;
+        showToast(msg, 'error');
+      }
+    }
+
+    // ---- Инициализация ----
+    loadHistory();
+    loadStrategy();
+    applyBtn.addEventListener('click', applyStrategy);
+
+    // Новый диалог: очищает историю, контекст и состояние стратегии.
+    // Сначала — подтверждение, чтобы случайный клик не стёр диалог.
+    newBtn.addEventListener('click', async () => {
+      if (!window.confirm('Начать новый диалог? Вся история и контекст будут очищены.')) {
+        return;
+      }
+      try {
+        const resp = await fetch('/reset', { method: 'POST' });
+        if (!resp.ok) throw new Error(await resp.text());
+        log.innerHTML = '';
+        session = { req: 0, resp: 0, cost: 0 };
+        document.getElementById('statsEmpty').style.display = 'block';
+        document.getElementById('statsBody').style.display = 'none';
+        showToast('Диалог начат заново (история и контекст очищены)', 'success');
+      } catch (err) {
+        showToast('не удалось очистить диалог: ' + String(err && err.message || err), 'error');
+      }
+    });
+
     async function loadHistory() {
       try {
         const resp = await fetch('/history');
@@ -177,33 +303,42 @@
         for (const m of msgs) add(m.role === 'user' ? 'user' : 'assistant', m.content);
       } catch (err) { /* игнорируем */ }
     }
-    loadHistory();
 
-    form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', (e) => {
       e.preventDefault();
       const text = input.value.trim();
       if (!text) return;
       input.value = '';
       add('user', text);
       showTyping();
-      try {
-        const resp = await fetch('/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text }),
-        });
+
+      // Стрим хода: события стратегии приходят живьём, затем — ответ агента.
+      const es = new EventSource('/chat/stream?message=' + encodeURIComponent(text));
+
+      es.addEventListener('strategy', (ev) => {
+        let p; try { p = JSON.parse(ev.data); } catch (err) { return; }
+        addEvents([p]);
+      });
+
+      es.addEventListener('reply', (ev) => {
         hideTyping();
-        if (!resp.ok) throw new Error(await resp.text());
-        const data = await resp.json();
-        add('assistant', data.reply);
-        renderStats(data.stats);
-      } catch (err) {
+        es.close();
+        let d = {}; try { d = JSON.parse(ev.data); } catch (err) {}
+        add('assistant', d.reply || '');
+        renderStats(d.stats);
+      });
+
+      es.addEventListener('chat_error', (ev) => {
         hideTyping();
-        let msg = (err && err.message) ? String(err.message) : 'неизвестная ошибка';
-        try { const j = JSON.parse(msg); if (j.error) msg = j.error; } catch (e) {}
+        es.close();
+        let msg = 'ошибка';
+        try { const j = JSON.parse(ev.data); if (j.error) msg = j.error; } catch (err) {}
         add('assistant', '[ошибка] ' + msg);
         showOverflow(msg);
-      }
+        showToast(msg, 'error');
+      });
+
+      es.onerror = () => {};
     });
   </script>
 </body>

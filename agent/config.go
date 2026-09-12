@@ -25,18 +25,31 @@ type Config struct {
 	ContextWindow  int    `json:"context_window"`  // размер контекстного окна модели в токенах (для виджета)
 	WebAddr        string `json:"web_addr"`
 	WebDir         string `json:"web_dir"`
+
+	// --- Стратегии управления контекстом (без summary, см. plans/context-management-plan.md) ---
+	// ContextStrategy: window | facts | branch; пусто — legacy-сжатие (compress) или off.
+	ContextStrategy string `json:"context_strategy"`
+	WindowSize      int    `json:"window_size"`     // SlidingWindow: сколько последних сообщений слать
+	FactsKeepLast   int    `json:"facts_keep_last"` // Facts: сколько последних сообщений слать с фактами
+	FactsKeyMax     int    `json:"facts_key_max"`   // Facts: лимит ключей фактов
+	FactsExtractor  string `json:"facts_extractor"` // Facts: "llm" | "heuristic"
 }
 
 // DefaultConfig возвращает конфиг со значениями по умолчанию.
 func DefaultConfig() *Config {
 	return &Config{
-		HistoryFile:    "agent_history.db",
-		KeepLast:       10,
-		SummarizeAfter: 10,
-		Compress:       true,
-		ContextWindow:  8192,
-		WebAddr:        "127.0.0.1:8080",
-		WebDir:         "web",
+		HistoryFile:     "agent_history.db",
+		KeepLast:        10,
+		SummarizeAfter:  10,
+		Compress:        true,
+		ContextWindow:   8192,
+		WebAddr:         "127.0.0.1:8080",
+		WebDir:          "web",
+		ContextStrategy: "window", // дефолт — скользящее окно
+		WindowSize:      10,
+		FactsKeepLast:   10,
+		FactsKeyMax:     50,
+		FactsExtractor:  ExtractorLLM, // по умолчанию точный LLM-режим извлечения
 	}
 }
 

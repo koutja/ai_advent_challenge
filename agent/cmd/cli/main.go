@@ -24,6 +24,7 @@ func main() {
 	stats := flag.Bool("stats", false, "прогнать сравнение токенов: короткий/длинный/переполненный диалог")
 	compressMode := flag.String("compress", "", "сжатие истории: on|off (перекрывает config.json)")
 	compare := flag.Bool("compare", false, "сравнить ответ и токены со сжатием и без")
+	compareStrategies := flag.Bool("compare-strategies", false, "прогнать сценарий «собираем ТЗ» на всех 3 стратегиях контекста")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -46,6 +47,10 @@ func main() {
 		die(err)
 	}
 
+	if *compareStrategies {
+		runCompareStrategies(cfg)
+		return
+	}
 	if *compare {
 		runCompare(ag)
 		return
@@ -61,12 +66,17 @@ func main() {
 		return
 	}
 
-	comp := "выкл"
-	if ag.CompressionEnabled() {
-		comp = "вкл"
+	strat := ag.StrategyName()
+	if strat == "" {
+		if ag.CompressionEnabled() {
+			strat = "legacy-сжатие"
+		} else {
+			strat = "off"
+		}
 	}
-	fmt.Printf("Агент запущен (модель %s, история: %s, сжатие: %s).\n", ag.Client().Model(), cfg.HistoryFile, comp)
-	fmt.Println("Команды: /reset — очистить историю, /compress — переключить сжатие, /exit — выход.")
+	fmt.Printf("Агент запущен (модель %s, история: %s, стратегия: %s).\n", ag.Client().Model(), cfg.HistoryFile, strat)
+	fmt.Println("Команды: /strategy [window|facts|branch], /checkpoint <имя>, /branch <имя>, /switch <имя>, /facts,")
+	fmt.Println("         /reset — очистить историю, /compress — legacy-сжатие, /exit — выход.")
 
 	printHistory(ag)
 	sc := bufio.NewScanner(os.Stdin)
@@ -77,6 +87,78 @@ func main() {
 			fmt.Print("> ")
 			continue
 		}
+		switch {
+		case strings.HasPrefix(line, "/strategy"):
+			parts := strings.Fields(line)
+			if len(parts) < 2 {
+				fmt.Printf("[стратегия: %s]\n", strategyLabel(ag))
+				fmt.Print("> ")
+				continue
+			}
+			if err := ag.SetStrategy(parts[1]); err != nil {
+				fmt.Printf("ошибка: %v\n", err)
+			} else {
+				fmt.Printf("[стратегия: %s]\n", parts[1])
+			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/checkpoint"):
+			name := strings.TrimSpace(strings.TrimPrefix(line, "/checkpoint"))
+			br, ok := ag.Strategy().(*agent.Branching)
+			if !ok {
+				fmt.Println("[ветвление не активно — включите /strategy branch]")
+				fmt.Print("> ")
+				continue
+			}
+			if err := br.Checkpoint(name); err != nil {
+				fmt.Printf("ошибка: %v\n", err)
+			} else {
+				fmt.Printf("[контрольная точка: %s, активна: %s]\n", br.Active(), br.State())
+			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/branch"):
+			name := strings.TrimSpace(strings.TrimPrefix(line, "/branch"))
+			br, ok := ag.Strategy().(*agent.Branching)
+			if !ok {
+				fmt.Println("[ветвление не активно — включите /strategy branch]")
+				fmt.Print("> ")
+				continue
+			}
+			if err := br.Branch(name); err != nil {
+				fmt.Printf("ошибка: %v\n", err)
+			} else {
+				fmt.Printf("[новая ветка: %s]\n", br.Active())
+			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/switch"):
+			name := strings.TrimSpace(strings.TrimPrefix(line, "/switch"))
+			br, ok := ag.Strategy().(*agent.Branching)
+			if !ok {
+				fmt.Println("[ветвление не активно — включите /strategy branch]")
+				fmt.Print("> ")
+				continue
+			}
+			if err := br.Switch(name); err != nil {
+				fmt.Printf("ошибка: %v\n", err)
+			} else {
+				fmt.Printf("[активная ветка: %s]\n", br.Active())
+			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/facts"):
+			fm, ok := ag.Strategy().(*agent.FactsMemory)
+			if !ok {
+				fmt.Println("[Facts не активна — включите /strategy facts]")
+				fmt.Print("> ")
+				continue
+			}
+			fmt.Println(fm.State())
+			fmt.Print("> ")
+			continue
+		}
+
 		switch line {
 		case "/exit", "/quit", "/q":
 			return
@@ -265,6 +347,107 @@ func printCompRow(label string, msgs []llm.Message, res *llm.Result, err error, 
 	}
 	fmt.Printf("%-12s история ~%-6d запрос %-6d ответ %-6d всего %-6d стоимость %s\n",
 		label, est, res.PromptTokens, res.CompletionTokens, res.TotalTokens, cost)
+}
+
+// strategyLabel возвращает человекочитаемое имя активной стратегии агента.
+func strategyLabel(ag *agent.Agent) string {
+	if n := ag.StrategyName(); n != "" {
+		return n
+	}
+	if ag.CompressionEnabled() {
+		return "legacy-сжатие"
+	}
+	return "off"
+}
+
+// runCompareStrategies прогоняет сценарий «собираем ТЗ» на всех трёх стратегиях
+// (свежий агент на каждую), печатает таблицу и анализ, сохраняет отчёт
+// plans/compare-context.md. Логика сравнения вынесена в пакет agent.
+func runCompareStrategies(cfg *agent.Config) {
+	fmt.Println("\n=== Сравнение стратегий контекста: window / facts / branch ===")
+	fmt.Println("Сценарий «собираем ТЗ» (12 ходов) + проверочный вопрос.")
+
+	results, err := agent.CompareStrategies(cfg, nil)
+	if err != nil {
+		fmt.Printf("ошибка сравнения: %v\n", err)
+		fmt.Println()
+		return
+	}
+
+	for _, r := range results {
+		printStratResult(r)
+	}
+	printComparisonTable(results)
+	writeCompareReport(results)
+
+	fmt.Print(agent.AnalyzeStrategies(results))
+	fmt.Println("\nОтчёт сохранён: plans/compare-context.md")
+	fmt.Println()
+}
+
+// printStratResult выводит метрики одной стратегии.
+func printStratResult(r agent.StrategyResult) {
+	if r.Error != "" {
+		fmt.Printf("  %-8s ошибка: %s\n", r.Name, r.Error)
+		return
+	}
+	fmt.Printf("  %-8s токены ~%-7d качество %.0f%%  стабильность %.0f%%  ходов %d\n",
+		r.Name, r.Tokens, r.Quality*100, r.Stability*100, r.Commands)
+}
+
+// printComparisonTable выводит сводную таблицу сравнения.
+func printComparisonTable(results []agent.StrategyResult) {
+	fmt.Println("\n--- Сводная таблица ---")
+	fmt.Printf("%-8s %-10s %-10s %-10s %-8s\n", "стратегия", "токены", "качество", "стабильность", "ходов")
+	for _, r := range results {
+		if r.Error != "" {
+			fmt.Printf("%-8s %-10s %-9s %-9s %-8s\n", r.Name, "—", "—", "—", "—")
+			continue
+		}
+		fmt.Printf("%-8s %-10d %-9.0f%% %-9.0f%% %-8d\n",
+			r.Name, r.Tokens, r.Quality*100, r.Stability*100, r.Commands)
+	}
+}
+
+// writeCompareReport формирует markdown-отчёт plans/compare-context.md.
+func writeCompareReport(results []agent.StrategyResult) {
+	var sb strings.Builder
+	sb.WriteString("# Сравнение стратегий управления контекстом\n\n")
+	sb.WriteString("Сценарий «собираем ТЗ» (~12 ходов) + финальный проверочный вопрос ")
+	sb.WriteString("«перечисли цель, ограничения и дедлайн». Оценка качества/стабильности — ")
+	sb.WriteString("эвристическая по ключевым терминам; расход токенов — сумма request+completion из Usage.\n\n")
+	sb.WriteString("| Стратегия | Токены | Качество | Стабильность | Ходов |\n")
+	sb.WriteString("|---|---|---|---|---|\n")
+	for _, r := range results {
+		if r.Error != "" {
+			fmt.Fprintf(&sb, "| %s | — | — | — | — |\n", r.Name)
+			continue
+		}
+		fmt.Fprintf(&sb, "| %s | %d | %.0f%% | %.0f%% | %d |\n",
+			r.Name, r.Tokens, r.Quality*100, r.Stability*100, r.Commands)
+	}
+	sb.WriteString("\n## Ожидаемые тенденции\n\n")
+	sb.WriteString("- **window** — минимум токенов, риск потери ранних фактов при маленьком N.\n")
+	sb.WriteString("- **facts** — баланс: мало токенов на вывод, детали держит, но тратит на извлечение.\n")
+	sb.WriteString("- **branch** — максимум токенов и стабильности в ветке, гибкий UX, сложнее управление.\n")
+
+	sb.WriteString("\n## Ответы на проверочный вопрос\n\n")
+	for _, r := range results {
+		fmt.Fprintf(&sb, "### %s\n\n", r.Name)
+		for i, a := range r.Answers {
+			fmt.Fprintf(&sb, "<details><summary>Ответ %d</summary>\n\n```\n%s\n```\n</details>\n\n", i+1, a)
+		}
+	}
+
+	sb.WriteString("\n" + agent.AnalyzeStrategies(results) + "\n")
+
+	if err := os.MkdirAll("plans", 0o755); err == nil {
+		if err := os.WriteFile("plans/compare-context.md", []byte(sb.String()), 0o644); err != nil {
+			fmt.Printf("предупреждение: не удалось записать отчёт: %v\n", err)
+		}
+	} else {
+		fmt.Printf("предупреждение: не удалось создать plans/: %v\n", err)
+	}
 }
 
 func die(err error) {

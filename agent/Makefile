@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-web build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-web build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -11,6 +11,10 @@ run-stats:
 # ===== Сравнение сжатия (Этап 4): без сжатия vs со сжатием =====
 run-compare:
 	go run ./cmd/cli --compare
+
+# ===== Сравнение стратегий контекста: window / facts / branch =====
+run-compare-strategies:
+	go run ./cmd/cli --compare-strategies
 
 # ===== Веб-интерфейс (опционально) =====
 run-web:

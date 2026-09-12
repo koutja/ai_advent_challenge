@@ -6,5 +6,10 @@
   "max_tokens": 0,
   "context_window": 8192,
   "web_addr": "127.0.0.1:8080",
-  "web_dir": "web"
+  "web_dir": "web",
+  "context_strategy": "window",
+  "window_size": 10,
+  "facts_keep_last": 10,
+  "facts_key_max": 50,
+  "facts_extractor": "llm"
 }
