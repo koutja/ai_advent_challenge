@@ -16,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 
 	"agent"
@@ -136,7 +137,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	var req chatReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "неверный JSON: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
 		return
 	}
 
@@ -144,7 +145,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": safeError(err)})
 		return
 	}
 
@@ -212,7 +213,7 @@ func handleChatStream(w http.ResponseWriter, r *http.Request) {
 
 	reply, err := ag.Say(msg)
 	if err != nil {
-		eb, _ := json.Marshal(map[string]string{"error": err.Error()})
+		eb, _ := json.Marshal(map[string]string{"error": safeError(err)})
 		send("chat_error", string(eb))
 		return
 	}
@@ -250,7 +251,7 @@ func handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ag.ResetContext(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, safeError(err), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -266,7 +267,7 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	hist, err := ag.Memory().Load()
 	if err != nil {
-		http.Error(w, "ошибка чтения истории: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "ошибка чтения истории: "+safeError(err), http.StatusInternalServerError)
 		return
 	}
 	type histMsg struct {
@@ -302,11 +303,11 @@ func handleStrategy(w http.ResponseWriter, r *http.Request) {
 
 	var req strategyReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "неверный JSON: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
 		return
 	}
 	if err := ag.SetStrategy(req.Strategy); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, safeError(err), http.StatusBadRequest)
 		return
 	}
 	resp.Current = ag.StrategyName()
@@ -322,7 +323,7 @@ func handleCompare(w http.ResponseWriter, r *http.Request) {
 	}
 	results, err := agent.CompareStrategies(appCfg, nil)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, safeError(err), http.StatusInternalServerError)
 		return
 	}
 	resp := compareResp{Results: results, Analysis: agent.AnalyzeStrategies(results)}
@@ -359,7 +360,7 @@ func handleCompareStream(w http.ResponseWriter, r *http.Request) {
 		send("progress", string(b))
 	})
 	if err != nil {
-		eb, _ := json.Marshal(map[string]string{"error": err.Error()})
+		eb, _ := json.Marshal(map[string]string{"error": safeError(err)})
 		send("compare_error", string(eb))
 		return
 	}
@@ -367,6 +368,25 @@ func handleCompareStream(w http.ResponseWriter, r *http.Request) {
 	resp := compareResp{Results: results, Analysis: agent.AnalyzeStrategies(results)}
 	b, _ := json.Marshal(resp)
 	send("done", string(b))
+}
+
+// urlHostInErr находит начало URL вместе с хостом (без пути) и query.
+// Пример: `https://shprotoness-ai.example.workers.dev/v1/chat/completions`
+// → заменится хост, путь `/v1/chat/completions` останется видимым.
+var urlHostInErr = regexp.MustCompile(`(?i)(https?://)[^/\s"'\x60\]]+`)
+
+// urlQueryInErr убирает query-параметры из URL (чтобы не утекали ключи вида ?api_key=...).
+var urlQueryInErr = regexp.MustCompile(`\?[^\s"'\x60\]]+`)
+
+// safeError маскирует в тексте ошибки базовый URL/хост провайдера, сохраняя путь
+// эндпоинта (например, `/v1/chat/completions`) и убирая query-параметры.
+func safeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := urlHostInErr.ReplaceAllString(err.Error(), "${1}api_url")
+	s = urlQueryInErr.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
 }
 
 func die(err error) {
