@@ -24,6 +24,7 @@ type TokenStats struct {
 	RequestTokens  int
 	ResponseTokens int
 	TotalTokens    int
+	ContextWindow  int // размер контекстного окна модели (для виджета переполнения)
 	CostUSD        float64
 	CostKnown      bool
 }

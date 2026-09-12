@@ -13,10 +13,11 @@ import (
 //
 // Метод Say() скрывает всю логику «запрос → LLM → ответ» от вызывающего кода.
 type Agent struct {
-	client *llm.Client
-	memory Memory
-	cfg    *Config
-	prices map[string]Price // цены моделей из ../llm/models.json
+	client   *llm.Client
+	memory   Memory
+	cfg      *Config
+	prices   map[string]Price // цены моделей из ../llm/models.json
+	compress *ContextManager  // сжатие истории (Этап 4); nil — выключено
 }
 
 // Reply — результат одного хода диалога: текст ответа, сырые метаданные запроса
@@ -35,7 +36,11 @@ func New(cfg *Config, mem Memory) (*Agent, error) {
 		return nil, err
 	}
 	prices, _ := loadPriceCatalog("../llm/models.json")
-	return &Agent{client: client, memory: mem, cfg: cfg, prices: prices}, nil
+	a := &Agent{client: client, memory: mem, cfg: cfg, prices: prices}
+	if cfg.Compress {
+		a.compress = NewContextManager(client, cfg.KeepLast, cfg.SummarizeAfter)
+	}
+	return a, nil
 }
 
 // Client возвращает активный клиент LLM (нужен фронтендам, напр. для имени модели).
@@ -49,6 +54,18 @@ func (a *Agent) SetMemory(m Memory) { a.memory = m }
 
 // Prices возвращает карту «id модели → цена» из каталога llm/models.json.
 func (a *Agent) Prices() map[string]Price { return a.prices }
+
+// SetCompress включает/выключает сжатие истории на лету.
+func (a *Agent) SetCompress(on bool) {
+	if on && a.compress == nil {
+		a.compress = NewContextManager(a.client, a.cfg.KeepLast, a.cfg.SummarizeAfter)
+	} else if !on {
+		a.compress = nil
+	}
+}
+
+// CompressionEnabled сообщает, включено ли сжатие истории.
+func (a *Agent) CompressionEnabled() bool { return a.compress != nil }
 
 // Say принимает реплику пользователя, отправляет её (вместе с историей) в LLM,
 // получает ответ и сохраняет оба сообщения в память. Возвращает текст ответа
@@ -66,11 +83,16 @@ func (a *Agent) Say(input string) (*Reply, error) {
 		return nil, err
 	}
 
-	// Формируем сообщения для запроса: история + новое сообщение пользователя.
-	// На Этапе 4 здесь подключается ContextManager (summary + последние N).
-	msgs := make([]llm.Message, 0, len(hist)+1)
-	msgs = append(msgs, hist...)
-	msgs = append(msgs, llm.Message{Role: "user", Content: input})
+	// Формируем сообщения для запроса. Если сжатие включено, старая часть истории
+	// заменяется сводкой (ContextManager), иначе отправляем всю историю как есть.
+	var msgs []llm.Message
+	if a.compress != nil {
+		msgs = a.compress.Build(hist, input)
+	} else {
+		msgs = make([]llm.Message, 0, len(hist)+1)
+		msgs = append(msgs, hist...)
+		msgs = append(msgs, llm.Message{Role: "user", Content: input})
+	}
 
 	histTokens := MessagesTokens(hist)
 
@@ -88,7 +110,7 @@ func (a *Agent) Say(input string) (*Reply, error) {
 
 // buildStats собирает TokenStats из фактических данных API и цен каталога.
 func (a *Agent) buildStats(res *llm.Result, histTokens int) *TokenStats {
-	st := &TokenStats{Model: res.Model, HistoryTokens: histTokens}
+	st := &TokenStats{Model: res.Model, HistoryTokens: histTokens, ContextWindow: a.cfg.ContextWindow}
 	if res.PromptTokens >= 0 {
 		st.RequestTokens = res.PromptTokens
 	}

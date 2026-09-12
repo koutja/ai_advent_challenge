@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-web build test reset-history demo
+.PHONY: run run-stats run-compare run-web build test reset-history demo
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -7,6 +7,10 @@ run:
 # ===== Сравнение токенов (Этап 3): короткий/длинный/переполненный диалог =====
 run-stats:
 	go run ./cmd/cli --stats
+
+# ===== Сравнение сжатия (Этап 4): без сжатия vs со сжатием =====
+run-compare:
+	go run ./cmd/cli --compare
 
 # ===== Веб-интерфейс (опционально) =====
 run-web:

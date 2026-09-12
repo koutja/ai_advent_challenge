@@ -22,6 +22,7 @@ type Config struct {
 	SummarizeAfter int    `json:"summarize_after"` // когда остальное уходит в summary (Этап 4)
 	Compress       bool   `json:"compress"`        // сжатие истории включено (Этап 4)
 	MaxTokens      int    `json:"max_tokens"`      // 0 — не передавать в API
+	ContextWindow  int    `json:"context_window"`  // размер контекстного окна модели в токенах (для виджета)
 	WebAddr        string `json:"web_addr"`
 	WebDir         string `json:"web_dir"`
 }
@@ -33,6 +34,7 @@ func DefaultConfig() *Config {
 		KeepLast:       10,
 		SummarizeAfter: 10,
 		Compress:       true,
+		ContextWindow:  8192,
 		WebAddr:        "127.0.0.1:8080",
 		WebDir:         "web",
 	}

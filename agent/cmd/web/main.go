@@ -37,6 +37,7 @@ type statsView struct {
 	HistoryTokens  int     `json:"history_tokens,omitempty"`
 	RequestTokens  int     `json:"request_tokens,omitempty"`
 	ResponseTokens int     `json:"response_tokens,omitempty"`
+	ContextWindow  int     `json:"context_window,omitempty"`
 	CostUSD        float64 `json:"cost_usd,omitempty"`
 	CostKnown      bool    `json:"cost_known,omitempty"`
 }
@@ -97,7 +98,9 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 
 	reply, err := ag.Say(req.Message)
 	if err != nil {
-		http.Error(w, "ошибка агента: "+err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -115,6 +118,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 			HistoryTokens:  reply.Stats.HistoryTokens,
 			RequestTokens:  reply.Stats.RequestTokens,
 			ResponseTokens: reply.Stats.ResponseTokens,
+			ContextWindow:  reply.Stats.ContextWindow,
 			CostUSD:        reply.Stats.CostUSD,
 			CostKnown:      reply.Stats.CostKnown,
 		}

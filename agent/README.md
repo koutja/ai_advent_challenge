@@ -21,12 +21,16 @@ agent/
 ## Команды
 
 ```bash
-go run ./cmd/cli           # консольный чат (REPL)
-go run ./cmd/cli --stats   # сравнение токенов: короткий/длинный/переполненный (Этап 3)
-go run ./cmd/web           # web-чат: http://127.0.0.1:8080
-make build                 # собрать bin/agent_cli и bin/agent_web
-make test                  # прогнать тесты (память + токены)
-make reset-history         # удалить agent_history.db (сброс истории)
+go run ./cmd/cli            # консольный чат (REPL)
+go run ./cmd/cli --stats    # сравнение токенов: короткий/длинный/переполненный (Этап 3)
+go run ./cmd/cli --compare  # сжатие: без сжатия vs со сжатием (Этап 4)
+go run ./cmd/cli --compress off   # запуск без сжатия истории
+go run ./cmd/web            # web-чат: http://127.0.0.1:8080
+make build                  # собрать bin/agent_cli и bin/agent_web
+make test                   # прогнать тесты (память + токены + сжатие)
+make reset-history          # удалить agent_history.db (сброс истории)
+```
+В REPL команда `/compress` переключает сжатие истории на лету.
 ```
 
 ## Настройка (куда идут запросы и ключи)

@@ -24,7 +24,11 @@
     .metric { margin: .7rem 0; }
     .metric .label { display: flex; justify-content: space-between; font-size: .85rem; color: #555; margin-bottom: .25rem; }
     .bar { height: 8px; background: #eef0f3; border-radius: 4px; overflow: hidden; }
-    .bar > span { display: block; height: 100%; width: 0; background: #4c8bf5; transition: width .3s; }
+    .bar > span { display: block; height: 100%; width: 0; background: #4c8bf5; transition: width .3s, background .3s; }
+    .ctx-ok > span { background: #2e9e44; }
+    .ctx-warn > span { background: #f5a623; }
+    .ctx-danger > span { background: #e5484d; }
+    .overflow { margin-top: .6rem; padding: .5rem .6rem; border-radius: 6px; background: #fdecec; color: #b42318; font-size: .85rem; font-weight: 600; }
     .totals { margin-top: 1rem; border-top: 1px solid #eef0f3; padding-top: .6rem; font-size: .9rem; }
     .totals div { display: flex; justify-content: space-between; margin: .3rem 0; }
     .totals .sec { font-weight: 600; border-bottom: 1px solid #eef0f3; margin-top: .5rem; }
@@ -56,6 +60,11 @@
           <div class="label"><span>Ответ (completion)</span><span id="mResponse">0</span></div>
           <div class="bar"><span id="bResponse"></span></div>
         </div>
+        <div class="metric" id="ctxBlock">
+          <div class="label"><span>Контекст (окно модели)</span><span id="mContext">0 / 0</span></div>
+          <div class="bar"><span id="bContext"></span></div>
+        </div>
+        <div id="overflowBox" class="overflow" style="display:none">⚠ переполнение контекста: история превысила окно модели, запрос не прошёл</div>
         <div class="totals">
           <div class="sec">Последний ответ</div>
           <div><span>Всего токенов</span><span id="mTotal">0</span></div>
@@ -127,12 +136,36 @@
       setBar('bRequest', req, max);
       setBar('bResponse', resp, max);
 
+      // Контекст: заполнение окна модели последним запросом (prompt).
+      const win = st.context_window || 0;
+      const ctx = document.getElementById('ctxBlock');
+      const bCtx = document.getElementById('bContext');
+      const mCtx = document.getElementById('mContext');
+      document.getElementById('overflowBox').style.display = 'none';
+      if (win > 0) {
+        const pct = Math.min(100, req / win * 100);
+        mCtx.textContent = req + ' / ' + win + ' (' + Math.round(pct) + '%)';
+        bCtx.style.width = pct + '%';
+        ctx.classList.remove('ctx-ok', 'ctx-warn', 'ctx-danger');
+        ctx.classList.add(pct >= 100 ? 'ctx-danger' : pct >= 80 ? 'ctx-warn' : 'ctx-ok');
+      } else {
+        mCtx.textContent = req + ' / ?';
+        bCtx.style.width = '0%';
+      }
+
       session.req += req;
       session.resp += resp;
       if (st.cost_known) session.cost += st.cost_usd || 0;
       document.getElementById('sRequest').textContent = session.req;
       document.getElementById('sResponse').textContent = session.resp;
       document.getElementById('sCost').textContent = '$' + session.cost.toFixed(6);
+    }
+
+    // Показывает предупреждение, если ошибка похожа на переполнение контекста.
+    function showOverflow(msg) {
+      const box = document.getElementById('overflowBox');
+      const isOverflow = /context|токенов|token|maximum|лимит|превыш|length/i.test(msg || '');
+      box.style.display = isOverflow ? 'block' : 'none';
     }
 
     // Показываем сохранённую историю при загрузке страницы (после перезапуска).
@@ -166,7 +199,10 @@
         renderStats(data.stats);
       } catch (err) {
         hideTyping();
-        add('assistant', '[ошибка] ' + err.message);
+        let msg = (err && err.message) ? String(err.message) : 'неизвестная ошибка';
+        try { const j = JSON.parse(msg); if (j.error) msg = j.error; } catch (e) {}
+        add('assistant', '[ошибка] ' + msg);
+        showOverflow(msg);
       }
     });
   </script>

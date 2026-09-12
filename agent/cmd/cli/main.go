@@ -22,6 +22,8 @@ func main() {
 	cfgPath := flag.String("config", "config.json", "путь к config.json")
 	reset := flag.Bool("reset", false, "сбросить историю перед стартом")
 	stats := flag.Bool("stats", false, "прогнать сравнение токенов: короткий/длинный/переполненный диалог")
+	compressMode := flag.String("compress", "", "сжатие истории: on|off (перекрывает config.json)")
+	compare := flag.Bool("compare", false, "сравнить ответ и токены со сжатием и без")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -44,13 +46,27 @@ func main() {
 		die(err)
 	}
 
+	if *compare {
+		runCompare(ag)
+		return
+	}
+	switch *compressMode {
+	case "on":
+		ag.SetCompress(true)
+	case "off":
+		ag.SetCompress(false)
+	}
 	if *stats {
 		runStats(ag)
 		return
 	}
 
-	fmt.Printf("Агент запущен (модель %s, история: %s).\n", ag.Client().Model(), cfg.HistoryFile)
-	fmt.Println("Команды: /reset — очистить историю, /exit — выход.")
+	comp := "выкл"
+	if ag.CompressionEnabled() {
+		comp = "вкл"
+	}
+	fmt.Printf("Агент запущен (модель %s, история: %s, сжатие: %s).\n", ag.Client().Model(), cfg.HistoryFile, comp)
+	fmt.Println("Команды: /reset — очистить историю, /compress — переключить сжатие, /exit — выход.")
 
 	printHistory(ag)
 	sc := bufio.NewScanner(os.Stdin)
@@ -67,6 +83,16 @@ func main() {
 		case "/reset":
 			_ = mem.Reset()
 			fmt.Println("[история сброшена]")
+			fmt.Print("> ")
+			continue
+		case "/compress":
+			if ag.CompressionEnabled() {
+				ag.SetCompress(false)
+				fmt.Println("[сжатие: выкл]")
+			} else {
+				ag.SetCompress(true)
+				fmt.Println("[сжатие: вкл]")
+			}
 			fmt.Print("> ")
 			continue
 		}
@@ -192,6 +218,53 @@ func buildDialog(turns, words int) []llm.Message {
 		)
 	}
 	return msgs
+}
+
+// runCompare прогоняет один запрос на одной и той же истории дважды: без сжатия
+// и со сжатием — и печатает, сколько токенов/стоимости экономит компрессия.
+func runCompare(ag *agent.Agent) {
+	const input = "Повтори кратко главную тему и ключевые факты нашего разговора."
+	hist := buildDialog(40, 100) // достаточно большая история для наглядного сравнения
+
+	client := ag.Client()
+	prices := ag.Prices()
+
+	fmt.Println("\n=== Сравнение: без сжатия / со сжатием ===")
+
+	full := append(append([]llm.Message{}, hist...), llm.Message{Role: "user", Content: input})
+	resFull, errFull := client.ChatResult(full, &llm.Options{MaxTokens: 64})
+
+	cm := agent.NewContextManager(client, 10, 10)
+	compressed := cm.Build(hist, input)
+	resCmp, errCmp := client.ChatResult(compressed, &llm.Options{MaxTokens: 64})
+
+	printCompRow("без сжатия", full, resFull, errFull, prices)
+	printCompRow("со сжатием", compressed, resCmp, errCmp, prices)
+
+	if errFull == nil && errCmp == nil {
+		saved := resFull.TotalTokens - resCmp.TotalTokens
+		pct := 0.0
+		if resFull.TotalTokens > 0 {
+			pct = float64(saved) / float64(resFull.TotalTokens) * 100
+		}
+		fmt.Printf("\nЭкономия токенов: %d (%.0f%%)\n", saved, pct)
+	}
+	fmt.Println()
+}
+
+// printCompRow печатает одну строку сравнения (запрос + метрики).
+func printCompRow(label string, msgs []llm.Message, res *llm.Result, err error, prices map[string]agent.Price) {
+	est := agent.MessagesTokens(msgs)
+	if err != nil {
+		fmt.Printf("%-12s история ~%-6d статус: ОШИБКА — %v\n", label, est, err)
+		return
+	}
+	cost := "—"
+	if p, ok := prices[res.Model]; ok {
+		cost = fmt.Sprintf("$%.6f", agent.Cost(p, res.PromptTokens, res.CompletionTokens))
+	}
+	fmt.Printf("%-12s история ~%-6d запрос %-6d ответ %-6d всего %-6d стоимость %s\n",
+		label, est, res.PromptTokens, res.CompletionTokens, res.TotalTokens, cost)
 }
 
 func die(err error) {
