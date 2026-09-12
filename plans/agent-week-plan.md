@@ -31,9 +31,8 @@ agent/
 │   ├── cli/main.go   # ФРОНТЕНД CLI: REPL-чат из stdin, флаги --reset/--stats/--compress, /exit
 │   └── web/main.go   # ФРОНТЕНД Web (опционально): HTTP-сервер + статика, вызывает то же ядро
 ├── web/index.html    # простая страница чата для web-интерфейса
-├── Makefile          # run / run-web / build / reset-history / demo
-├── README.md         # описание этапов и команд
-└── demo/demo.sh      # демо-прогон (см. skill record-demo)
+├── Makefile          # run / run-web / build / reset-history
+└── README.md         # описание этапов и команд
 ```
 
 Поток запроса (после всех этапов); верхний блок — точка входа зависит от выбранного фронтенда:

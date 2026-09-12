@@ -3,40 +3,16 @@
 Репозиторий с ежедневными консольными проектами (Go и др.). Каждый день лежит в
 отдельной папке `day_NN/` со своим `Makefile`, кодом и `README.md`.
 
-## 📹 Запись демонстрации работы проекта в видео (MP4)
+Демонстрацию работы дня записывает пользователь сам — простой записью видео через
+среду разработки (демо-скрипты агент не создаёт).
 
-Скрипт **сам печатает команды** в терминал и записывает прогон в видео — без ручной
-записи экрана. Пайплайн: `demo-magic.sh` → `asciinema rec` → `agg` (MP4).
-
-Полная инструкция и функции demo-magic — в skill `record-demo`
-([`.agents/skills/record-demo/SKILL.md`](.agents/skills/record-demo/SKILL.md)) и в
-[`AGENTS.md`](AGENTS.md). Ниже — только быстрые команды.
-
-### Быстрый старт
+## Скиллы и новый день
 
 ```bash
-make sync            # симлинк на скиллы из .agents/skills в активную harness (.codeassistant/skills)
-make install-tools   # один раз: asciinema, agg, ffmpeg, pv
+make sync                   # симлинк скиллов из .agents/skills в активную harness
+make sync HARNESS=claude    # другая harness: claude | roo | cursor
+make new-day DAY=day_04     # каркас нового дня (Go-модуль + llm + Makefile + README)
 ```
-
-### Записать демо для любого дня
-
-```bash
-make new-demo DAY=day_01                     # создать day_01/demo/demo.sh
-# (опционально) отредактировать команды в day_01/demo/demo.sh
-make record DEMO=day_01/demo/demo.sh         # получить day_01/demo/demo.mp4
-open day_01/demo/demo.mp4
-```
-
-### Варианты
-
-```bash
-make sync HARNESS=claude                      # другая harness: claude | roo | cursor
-make record DEMO=day_01/demo/demo.sh OUT=day_01/demo/demo.webm   # другой формат
-# Рендер по умолчанию уже использует --theme=solarized-light (иначе текст мог
-# рендериться чёрным на чёрном -> чёрное видео). Переопределить тему целиком:
-make record DEMO=day_01/demo/demo.sh AGG_OPTS="--theme=solarized-dark --fps 30"
-KEEP_CAST=1 make record DEMO=day_01/demo/demo.sh   # сохранить промежуточный .cast
 
 ## 📂 Дни проекта
 

@@ -26,7 +26,6 @@
 | `go.mod`       | Go-модуль                                                      |
 | `Makefile`     | Цели `run-free`, `run-limited`, `run-all`, `build`             |
 | `.env`         | Ключ API, базовый URL, модель (**секретный**)                  |
-| `demo/demo.sh` | Демонстрация через demo-magic (видео не записываем)            |
 
 ## Переменные окружения (`.env`)
 

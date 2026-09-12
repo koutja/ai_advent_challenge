@@ -26,7 +26,6 @@
 | `go.mod`        | Модуль `day_04` + `require aichallenge/llm` + `replace => ../llm`    |
 | `Makefile`      | Цели `run`, `run-all`, `run-single`, `build`                         |
 | `README.md`     | Описание, запуск, пример                                             |
-| `demo/demo.sh`  | Скрипт демонстрации (запись видео — по явной просьбе)                |
 
 ## Переменные окружения (`.env`)
 

@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-web build test reset-history demo
+.PHONY: run run-stats run-compare run-web build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -29,7 +29,3 @@ test:
 # ===== Сброс истории (удаление файла SQLite, Этап 2) =====
 reset-history:
 	rm -f agent_history.db
-
-# ===== Демо-прогон: см. skill record-demo =====
-demo:
-	@echo "запись демо: см. skill record-demo (make new-demo/record)"
