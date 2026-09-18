@@ -28,8 +28,22 @@
     form { display: flex; gap: .5rem; margin-top: .8rem; }
     input { flex: 1; padding: .5rem; border: 1px solid #ccc; border-radius: 6px; }
     button { padding: .5rem 1.1rem; border: 0; border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
-    #stats { flex: 0 0 320px; background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 1rem; }
-    #stats h2 { margin: 0 0 .8rem; font-size: 1rem; }
+    .side { flex: 0 0 340px; display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    #stats, #mem { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 1rem; }
+    #stats h2, #mem h2 { margin: 0 0 .8rem; font-size: 1rem; }
+    .mem-note { font-size: .8rem; color: #666; margin: 0 0 .8rem; }
+    .layer { border: 1px solid #eef0f3; border-radius: 8px; margin-bottom: .6rem; overflow: hidden; }
+    .layer-head { padding: .35rem .6rem; font-size: .8rem; font-weight: 600; color: #fff; }
+    .layer-head.short { background: #4c8bf5; }
+    .layer-head.work { background: #f5a623; }
+    .layer-head.long { background: #7a5cd6; }
+    .layer-body { padding: .45rem .6rem; font-size: .82rem; background: #fafbfc; }
+    .layer-body .fact { margin: .15rem 0; white-space: pre-wrap; }
+    .layer-body .fact b { color: #333; }
+    .mem-actions { margin-top: .9rem; border-top: 1px solid #eef0f3; padding-top: .7rem; display: flex; flex-direction: column; gap: .4rem; }
+    .mem-actions h3 { margin: 0 0 .2rem; font-size: .85rem; }
+    .mem-actions select, .mem-actions input { width: 100%; }
+    .btn-secondary { background: #5f6368; }
     .empty { color: #999; font-size: .9rem; }
     .metric { margin: .7rem 0; }
     .metric .label { display: flex; justify-content: space-between; font-size: .85rem; color: #555; margin-bottom: .25rem; }
@@ -77,6 +91,7 @@
         <button type="submit">Отправить</button>
       </form>
     </div>
+    <div class="side">
     <aside id="stats">
       <h2>Статистика токенов</h2>
       <div id="statsEmpty" class="empty">Пока нет данных. Отправьте сообщение.</div>
@@ -110,6 +125,46 @@
         </div>
       </div>
     </aside>
+
+    <aside id="mem">
+      <h2>Память агента (3 слоя)</h2>
+      <p class="mem-note">Слои хранятся раздельно. Запрос к LLM собирается:
+        <b>long → working → диалог</b>. Роутинг: сообщения → <b>short</b>,
+        факты реплики → <b>working</b>, профиль/решения/знания → <b>long</b> (явно).</p>
+
+      <div class="layer">
+        <div class="layer-head short">🧠 short — диалог</div>
+        <div class="layer-body" id="memShort">0 сообщений</div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-head work">🗂️ working — данные текущей задачи</div>
+        <div class="layer-body" id="memWorking"></div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-head long">💾 long — профиль / решения / знания</div>
+        <div class="layer-body" id="memLong"></div>
+      </div>
+
+      <div class="mem-actions">
+        <h3>Записать в long-память</h3>
+        <select id="memKind">
+          <option value="profile">profile</option>
+          <option value="decision">decision</option>
+          <option value="knowledge">knowledge</option>
+          <option value="preference">preference</option>
+        </select>
+        <input id="memKey" placeholder="ключ (напр. имя)">
+        <input id="memVal" placeholder="значение (напр. Анна)">
+        <button id="memRemember" type="button">💾 Запомнить</button>
+      </div>
+
+      <div class="mem-actions">
+        <button id="memNewTask" type="button" class="btn-secondary">＋ Новая задача (short+working очистятся, long останется)</button>
+      </div>
+    </aside>
+    </div>
   </div>
 
   <div id="toasts"></div>
@@ -271,9 +326,85 @@
       }
     }
 
+    // ---- Память (3 слоя): рендер + управление ----
+    const memShort = document.getElementById('memShort');
+    const memWorking = document.getElementById('memWorking');
+    const memLong = document.getElementById('memLong');
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s == null ? '' : String(s);
+      return d.innerHTML;
+    }
+
+    function renderMemory(data) {
+      if (!data) return;
+      memShort.textContent = (data.short_messages || 0) + ' сообщений';
+
+      const wKeys = Object.keys(data.working || {});
+      if (wKeys.length === 0) {
+        memWorking.innerHTML = '<span class="empty">нет фактов</span>';
+      } else {
+        memWorking.innerHTML = wKeys.map(k =>
+          '<div class="fact"><b>' + esc(k) + ':</b> ' + esc(data.working[k]) + '</div>'
+        ).join('');
+      }
+
+      const long = data.long || [];
+      if (long.length === 0) {
+        memLong.innerHTML = '<span class="empty">пусто</span>';
+      } else {
+        memLong.innerHTML = long.map(e =>
+          '<div class="fact"><b>[' + esc(e.kind) + ']</b> ' + esc(e.key) + ': ' + esc(e.value) + '</div>'
+        ).join('');
+      }
+    }
+
+    async function loadMemory() {
+      try {
+        const resp = await fetch('/memory');
+        if (!resp.ok) return;
+        renderMemory(await resp.json());
+      } catch (e) { /* игнорируем */ }
+    }
+
+    document.getElementById('memRemember').addEventListener('click', async () => {
+      const kind = document.getElementById('memKind').value;
+      const key = document.getElementById('memKey').value.trim();
+      const val = document.getElementById('memVal').value.trim();
+      if (!key || !val) { showToast('Укажите ключ и значение', 'warn'); return; }
+      try {
+        const resp = await fetch('/remember', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind, key, value: val }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        document.getElementById('memKey').value = '';
+        document.getElementById('memVal').value = '';
+        await loadMemory();
+        showToast('Сохранено в long-память: [' + kind + '] ' + key, 'success');
+      } catch (err) {
+        showToast('не удалось запомнить: ' + String(err && err.message || err), 'error');
+      }
+    });
+
+    document.getElementById('memNewTask').addEventListener('click', async () => {
+      try {
+        const resp = await fetch('/newtask', { method: 'POST' });
+        if (!resp.ok) throw new Error(await resp.text());
+        await loadMemory();
+        loadHistory(); // перерисовать короткий слой (история очищена)
+        showToast('Новая задача: short+working очищены, long сохранён', 'success');
+      } catch (err) {
+        showToast('не удалось начать новую задачу: ' + String(err && err.message || err), 'error');
+      }
+    });
+
     // ---- Инициализация ----
     loadHistory();
     loadStrategy();
+    loadMemory();
     applyBtn.addEventListener('click', applyStrategy);
 
     // Новый диалог: очищает историю, контекст и состояние стратегии.
@@ -326,6 +457,7 @@
         let d = {}; try { d = JSON.parse(ev.data); } catch (err) {}
         add('assistant', d.reply || '');
         renderStats(d.stats);
+        loadMemory(); // после хода short/working могли измениться
       });
 
       es.addEventListener('chat_error', (ev) => {

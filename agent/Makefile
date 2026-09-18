@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-web build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-web stop-web build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -23,6 +23,18 @@ run-compare-memory:
 # ===== Веб-интерфейс (опционально) =====
 run-web:
 	go run ./cmd/web
+
+# Остановить ранее запущенный web-сервер (по порту из config.json: web_addr).
+# `go run` компилирует бинарник во временную папку, поэтому гасим процесс,
+# слушающий порт (по умолчанию 8080).
+WEB_PORT ?= 8080
+stop-web:
+	@pid=$$(lsof -ti tcp:$(WEB_PORT) 2>/dev/null); \
+	if [ -n "$$pid" ]; then \
+		kill $$pid && echo "web остановлен (pid $$pid, порт $(WEB_PORT))"; \
+	else \
+		echo "web на порту $(WEB_PORT) не запущен"; \
+	fi
 
 # ===== Сборка обоих бинарников в agent/bin/ =====
 build:

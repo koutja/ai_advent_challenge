@@ -34,6 +34,7 @@ go run ./cmd/cli --compare-strategies # прогон сценария «соби
 go run ./cmd/cli --compare-memory    # влияние долговременной памяти на ответы (long vs без)
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
 go run ./cmd/web --strategy branch   # web-чат со стратегией по умолчанию (window|facts|branch)
+make stop-web                        # остановить ранее запущенный go run ./cmd/web (по порту 8080)
 make build                           # собрать bin/agent_cli и bin/agent_web
 make test                            # прогнать тесты
 make reset-history                   # удалить agent_history.db (сброс истории)
@@ -115,6 +116,11 @@ go run ./cmd/cli --compare-strategies
 ```bash
 go run ./cmd/cli --compare-memory   # агент с long-памятью vs без неё, оценка recall
 ```
+
+В веб-интерфейсе (`web/index.html`) есть панель «Память агента (3 слоя)»: она в реальном
+времени показывает содержимое short/working/long после каждого хода, а также позволяет
+записать запись в long-память (`POST /remember`) и начать новую задачу (`POST /newtask`,
+очищает short+working, сохраняя long) — наглядная демонстрация процесса управления памятью.
 
 Полезные команды REPL: `/memory` (снапшот трёх слоёв), `/remember profile имя Анна`, `/newtask` (новая задача).
 
