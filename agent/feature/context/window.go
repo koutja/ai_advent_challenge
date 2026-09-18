@@ -1,17 +1,19 @@
-package agent
+package context
 
 import (
 	"fmt"
 
 	"aichallenge/llm"
+
+	"agent/feature/dialog"
 )
 
 // SlidingWindow — стратегия контекста «скользящее окно» (Стратегия 1).
 //
 // Хранит только последние N сообщений, всё старше — отбрасывается на уровне
-// запроса. Память продолжает хранить полную историю; стратегия просто режет
-// слайс в Build(). Самый дешёвый по токенам вариант, но ранние детали диалога
-// (цель/дедлайн) теряются, если история длиннее окна.
+// запроса. Short-term память продолжает хранить полную историю; стратегия просто
+// режет слайс в Build(). Самый дешёвый по токенам вариант, но ранние детали
+// диалога (цель/дедлайн) теряются, если история длиннее окна.
 type SlidingWindow struct {
 	size int           // сколько последних сообщений отправлять в запрос
 	sink EventSinkFunc // приёмник событий стратегии (nil — события не шлются)
@@ -39,7 +41,7 @@ func (w *SlidingWindow) emit(kind, text string) {
 }
 
 // History возвращает всю историю из памяти (стратегия ничего своего не хранит).
-func (w *SlidingWindow) History(mem Memory) []llm.Message {
+func (w *SlidingWindow) History(mem dialog.Memory) []llm.Message {
 	hist, _ := mem.Load()
 	return hist
 }

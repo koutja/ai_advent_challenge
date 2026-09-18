@@ -1,18 +1,23 @@
-package agent
+// Package dialog — short-term память агента: история текущего диалога.
+//
+// Отдельный feature-пакет, отвечающий только за «короткий» слой памяти
+// (текущий разговор). Ядро Agent работает с интерфейсом Memory, поэтому
+// среда исполнения не зависит от конкретной БД.
+package dialog
 
 import (
-	"aichallenge/llm"
 	"database/sql"
 	"fmt"
+
+	"aichallenge/llm"
 
 	_ "modernc.org/sqlite" // регистрирует драйвер "sqlite" (чистый Go, без cgo)
 )
 
-// Memory — абстракция над хранилищем истории диалога. Ядро Agent работает только
-// с этим интерфейсом, поэтому среда исполнения не зависит от конкретной БД.
+// Memory — хранилище истории диалога (short-term слой).
 //
-// На Этапе 1 используется простая in-memory реализация (InMemory). На Этапе 2
-// подключается SQLiteMemory — интерфейс при этом не меняется.
+// Для тестов и лёгких окружений есть InMemory; для переживающего перезапуск
+// хранения — SQLiteMemory. Интерфейс у обоих одинаковый.
 type Memory interface {
 	// Load возвращает всю сохранённую историю в порядке диалога.
 	Load() ([]llm.Message, error)
@@ -24,7 +29,7 @@ type Memory interface {
 	Close() error
 }
 
-// InMemory — хранилище истории в оперативной памяти (Этап 1). Ничего не пишет на диск.
+// InMemory — хранилище истории в оперативной памяти. Ничего не пишет на диск.
 type InMemory struct {
 	msgs []llm.Message
 }
@@ -50,8 +55,8 @@ func (m *InMemory) Reset() error {
 // Close — заглушка, ресурсы не использует.
 func (m *InMemory) Close() error { return nil }
 
-// SQLiteMemory — хранилище истории в SQLite (Этап 2). Диалог переживает
-// перезапуск: сообщения лежат в таблице messages (role, content, порядок по id).
+// SQLiteMemory — хранилище истории в SQLite. Диалог переживает перезапуск:
+// сообщения лежат в таблице messages (role, content, порядок по id).
 type SQLiteMemory struct {
 	db *sql.DB
 }

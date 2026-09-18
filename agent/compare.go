@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"agent/feature/memory"
 	"fmt"
 	"strconv"
 	"strings"
@@ -75,7 +76,7 @@ func CompareStrategies(cfg *Config, progress ProgressFunc) ([]StrategyResult, er
 		c := *cfg
 		c.ContextStrategy = name
 		emit(CompareProgress{Strategy: name, Step: 0, Total: len(compareScenario), Status: "start", Message: "Старт стратегии"})
-		ag, err := New(&c, NewInMemory())
+		ag, err := New(&c, memory.NewLayeredRAM())
 		if err != nil {
 			msg := "не удалось создать агента: " + err.Error()
 			emit(CompareProgress{Strategy: name, Status: "error", Message: msg})

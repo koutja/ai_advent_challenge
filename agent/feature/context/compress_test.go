@@ -1,15 +1,17 @@
-package agent
+package context_test
 
 import (
 	"testing"
 
 	"aichallenge/llm"
+
+	"agent/feature/context"
 )
 
 // TestContextManagerKeepsLastRaw: при истории меньше keepLast сжатия нет,
 // запрос = вся история + новый ввод, сводки нет.
 func TestContextManagerKeepsLastRaw(t *testing.T) {
-	cm := NewContextManager(nil, 10, 10) // client не нужен: суммаризация не вызывается
+	cm := context.NewContextManager(nil, 10, 10) // client не нужен: суммаризация не вызывается
 	hist := []llm.Message{
 		{Role: "user", Content: "a"},
 		{Role: "assistant", Content: "b"},
@@ -31,7 +33,7 @@ func TestContextManagerKeepsLastRaw(t *testing.T) {
 // вводом пользователя, даже при длинной истории.
 func TestContextManagerBuildAddsUserLast(t *testing.T) {
 	// summarizeEvery большой — суммаризация (и вызов LLM) в этом тесте не запускается.
-	cm := NewContextManager(nil, 2, 1000)
+	cm := context.NewContextManager(nil, 2, 1000)
 	hist := []llm.Message{
 		{Role: "user", Content: "1"}, {Role: "assistant", Content: "2"},
 		{Role: "user", Content: "3"}, {Role: "assistant", Content: "4"},

@@ -1,15 +1,19 @@
-package agent
+package context_test
 
 import (
+	"strings"
 	"testing"
 
 	"aichallenge/llm"
+
+	"agent/feature/context"
+	"agent/feature/dialog"
 )
 
 // TestSlidingWindowTrimsHistory: Build режет историю до последних N сообщений
 // и добавляет ввод пользователя последним.
 func TestSlidingWindowTrimsHistory(t *testing.T) {
-	w := NewSlidingWindow(4)
+	w := context.NewSlidingWindow(4)
 	hist := []llm.Message{
 		{Role: "user", Content: "1"}, {Role: "assistant", Content: "2"},
 		{Role: "user", Content: "3"}, {Role: "assistant", Content: "4"},
@@ -30,7 +34,7 @@ func TestSlidingWindowTrimsHistory(t *testing.T) {
 
 // TestSlidingWindowKeepsShortHistory: при истории короче окна ничего не режется.
 func TestSlidingWindowKeepsShortHistory(t *testing.T) {
-	w := NewSlidingWindow(10)
+	w := context.NewSlidingWindow(10)
 	hist := []llm.Message{
 		{Role: "user", Content: "a"},
 		{Role: "assistant", Content: "b"},
@@ -43,15 +47,15 @@ func TestSlidingWindowKeepsShortHistory(t *testing.T) {
 
 // TestSlidingWindowDefaultSize: размер по умолчанию подставляется при <=0.
 func TestSlidingWindowDefaultSize(t *testing.T) {
-	w := NewSlidingWindow(0)
-	if w.size != 10 {
-		t.Fatalf("ожидали размер 10, получили %d", w.size)
+	w := context.NewSlidingWindow(0)
+	if !strings.Contains(w.State(), "size=10") {
+		t.Fatalf("ожидали размер 10, получили State=%q", w.State())
 	}
 }
 
 // TestSlidingWindowNoOpObserveReset: Observe/Reset ничего не ломают.
 func TestSlidingWindowNoOpObserveReset(t *testing.T) {
-	w := NewSlidingWindow(5)
+	w := context.NewSlidingWindow(5)
 	hist := []llm.Message{{Role: "user", Content: "x"}}
 	if err := w.Observe(hist); err != nil {
 		t.Fatalf("Observe должен быть no-op: %v", err)
@@ -66,9 +70,9 @@ func TestSlidingWindowNoOpObserveReset(t *testing.T) {
 
 // TestSlidingWindowHistoryUsesMemory: History возвращает историю из памяти.
 func TestSlidingWindowHistoryUsesMemory(t *testing.T) {
-	mem := NewInMemory()
+	mem := dialog.NewInMemory()
 	_ = mem.Append(llm.Message{Role: "user", Content: "привет"})
-	w := NewSlidingWindow(5)
+	w := context.NewSlidingWindow(5)
 	hist := w.History(mem)
 	if len(hist) != 1 || hist[0].Content != "привет" {
 		t.Fatalf("History вернул не ту историю: %+v", hist)

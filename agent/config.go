@@ -6,6 +6,7 @@
 package agent
 
 import (
+	"agent/feature/memory"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,12 +18,13 @@ import (
 // из переменных окружения через общий пакет ../llm (LLM_API_KEY / LLM_BASE_URL /
 // LLM_MODEL, каскадная загрузка .env). См. правило 6 в AGENTS.md.
 type Config struct {
-	HistoryFile    string `json:"history_file"`    // путь к БД истории (Этап 2, SQLite)
-	KeepLast       int    `json:"keep_last"`       // сколько последних сообщений хранить "как есть" (Этап 4)
-	SummarizeAfter int    `json:"summarize_after"` // когда остальное уходит в summary (Этап 4)
-	Compress       bool   `json:"compress"`        // сжатие истории включено (Этап 4)
-	MaxTokens      int    `json:"max_tokens"`      // 0 — не передавать в API
-	ContextWindow  int    `json:"context_window"`  // размер контекстного окна модели в токенах (для виджета)
+	HistoryFile    string `json:"history_file"`     // путь к БД истории (short-слой, SQLite)
+	LongMemoryFile string `json:"long_memory_file"` // путь к БД долговременной памяти (long-слой, SQLite)
+	KeepLast       int    `json:"keep_last"`        // сколько последних сообщений хранить "как есть" (Этап 4)
+	SummarizeAfter int    `json:"summarize_after"`  // когда остальное уходит в summary (Этап 4)
+	Compress       bool   `json:"compress"`         // сжатие истории включено (Этап 4)
+	MaxTokens      int    `json:"max_tokens"`       // 0 — не передавать в API
+	ContextWindow  int    `json:"context_window"`   // размер контекстного окна модели в токенах (для виджета)
 	WebAddr        string `json:"web_addr"`
 	WebDir         string `json:"web_dir"`
 
@@ -39,6 +41,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		HistoryFile:     "agent_history.db",
+		LongMemoryFile:  "agent_longterm.db",
 		KeepLast:        10,
 		SummarizeAfter:  10,
 		Compress:        true,
@@ -49,7 +52,7 @@ func DefaultConfig() *Config {
 		WindowSize:      10,
 		FactsKeepLast:   10,
 		FactsKeyMax:     50,
-		FactsExtractor:  ExtractorLLM, // по умолчанию точный LLM-режим извлечения
+		FactsExtractor:  memory.ExtractorLLM, // по умолчанию точный LLM-режим извлечения
 	}
 }
 

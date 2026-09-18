@@ -1,10 +1,12 @@
-package agent
+package dialog_test
 
 import (
 	"path/filepath"
 	"testing"
 
 	"aichallenge/llm"
+
+	"agent/feature/dialog"
 )
 
 // TestSQLiteMemoryPersistence проверяет, что история сохраняется в SQLite и
@@ -12,7 +14,7 @@ import (
 func TestSQLiteMemoryPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hist.db")
 
-	m1, err := NewSQLiteMemory(path)
+	m1, err := dialog.NewSQLiteMemory(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -27,7 +29,7 @@ func TestSQLiteMemoryPersistence(t *testing.T) {
 	}
 
 	// Повторное открытие той же БД = «перезапуск».
-	m2, err := NewSQLiteMemory(path)
+	m2, err := dialog.NewSQLiteMemory(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -51,7 +53,7 @@ func TestSQLiteMemoryPersistence(t *testing.T) {
 // TestSQLiteMemoryReset проверяет очистку истории.
 func TestSQLiteMemoryReset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hist.db")
-	m, err := NewSQLiteMemory(path)
+	m, err := dialog.NewSQLiteMemory(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -1,4 +1,4 @@
-package agent
+package context
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"aichallenge/llm"
+
+	"agent/feature/dialog"
 )
 
 // Branching — стратегия контекста «ветвление» (Стратегия 3).
@@ -44,8 +46,8 @@ func (b *Branching) emit(kind, text string) {
 	}
 }
 
-// History возвращает историю активной ветки (не трогая общую Memory).
-func (b *Branching) History(mem Memory) []llm.Message {
+// History возвращает историю активной ветки (не трогая общую short-term память).
+func (b *Branching) History(mem dialog.Memory) []llm.Message {
 	return cloneMsgs(b.branches[b.active])
 }
 

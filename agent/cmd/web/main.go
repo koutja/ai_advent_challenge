@@ -10,6 +10,8 @@
 package main
 
 import (
+	"agent/feature/context"
+	"agent/feature/memory"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -62,10 +64,10 @@ type statsView struct {
 }
 
 type chatResp struct {
-	Reply  string                `json:"reply"`
-	Usage  *usageView            `json:"usage,omitempty"`
-	Stats  *statsView            `json:"stats,omitempty"`
-	Events []agent.StrategyEvent `json:"events,omitempty"`
+	Reply  string                  `json:"reply"`
+	Usage  *usageView              `json:"usage,omitempty"`
+	Stats  *statsView              `json:"stats,omitempty"`
+	Events []context.StrategyEvent `json:"events,omitempty"`
 }
 
 func main() {
@@ -87,8 +89,9 @@ func main() {
 		*webDir = cfg.WebDir
 	}
 
-	// Этап 2: история сохраняется в SQLite (cfg.HistoryFile) и переживает перезапуск.
-	mem, err := agent.NewSQLiteMemory(cfg.HistoryFile)
+	// Многослойная память: short- и long-слои в SQLite (переживают перезапуск),
+	// working — в RAM (жизнь одной задачи).
+	mem, err := memory.NewLayeredSQLite(cfg.HistoryFile, cfg.LongMemoryFile)
 	if err != nil {
 		die(err)
 	}
@@ -111,6 +114,9 @@ func main() {
 	http.HandleFunc("/history", handleHistory)
 	http.HandleFunc("/reset", handleReset)
 	http.HandleFunc("/strategy", handleStrategy)
+	http.HandleFunc("/memory", handleMemory)
+	http.HandleFunc("/remember", handleRemember)
+	http.HandleFunc("/newtask", handleNewTask)
 	http.HandleFunc("/compare", handleCompare)
 	http.HandleFunc("/compare/stream", handleCompareStream)
 	http.Handle("/", http.FileServer(http.Dir(*webDir)))
@@ -205,7 +211,7 @@ func handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Передаём события стратегии в стрим сразу, как только они возникают.
-	ag.SetOnEvent(func(se agent.StrategyEvent) {
+	ag.SetOnEvent(func(se context.StrategyEvent) {
 		b, _ := json.Marshal(se)
 		send("strategy", string(b))
 	})
@@ -289,7 +295,7 @@ func handleStrategy(w http.ResponseWriter, r *http.Request) {
 
 	resp := strategyResp{
 		Current:   ag.StrategyName(),
-		Available: agent.StrategyNames,
+		Available: context.StrategyNames,
 	}
 
 	if r.Method == http.MethodGet {
@@ -368,6 +374,71 @@ func handleCompareStream(w http.ResponseWriter, r *http.Request) {
 	resp := compareResp{Results: results, Analysis: agent.AnalyzeStrategies(results)}
 	b, _ := json.Marshal(resp)
 	send("done", string(b))
+}
+
+// memoryView — JSON-представление трёх слоёв памяти.
+type memoryView struct {
+	Short   int                `json:"short_messages"`
+	Working map[string]string  `json:"working"`
+	Long    []memory.LongEntry `json:"long"`
+}
+
+// handleMemory: GET — вернуть снапшот трёх слоёв памяти (для UI).
+func handleMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "ожидается GET", http.StatusMethodNotAllowed)
+		return
+	}
+	m := ag.Memories()
+	hist, _ := m.Short().Load()
+	long, _ := m.Long().All()
+	resp := memoryView{Short: len(hist), Working: m.Working().All(), Long: long}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+type rememberReq struct {
+	Kind  string `json:"kind"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// handleRemember: POST — явно сохранить запись в долговременный слой памяти.
+func handleRemember(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "ожидается POST", http.StatusMethodNotAllowed)
+		return
+	}
+	var req rememberReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
+		return
+	}
+	if req.Kind == "" || req.Key == "" {
+		http.Error(w, "нужны kind и key", http.StatusBadRequest)
+		return
+	}
+	if err := ag.Remember(req.Kind, req.Key, req.Value); err != nil {
+		http.Error(w, safeError(err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleNewTask: POST — начать новую задачу: очистить короткий и рабочий слои,
+// долговременную память сохранить.
+func handleNewTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "ожидается POST", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := ag.ResetContext(); err != nil {
+		http.Error(w, safeError(err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // urlHostInErr находит начало URL вместе с хостом (без пути) и query.

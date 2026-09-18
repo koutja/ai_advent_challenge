@@ -1,15 +1,17 @@
-package agent
+package context_test
 
 import (
 	"testing"
 
 	"aichallenge/llm"
+
+	"agent/feature/context"
 )
 
 // TestBranchingCheckpointBranchSwitch: Checkpoint → Branch → Switch дают
 // независимые истории веток.
 func TestBranchingCheckpointBranchSwitch(t *testing.T) {
-	b := NewBranching()
+	b := context.NewBranching()
 
 	// Ход в основной ветке.
 	_ = b.Observe([]llm.Message{{Role: "user", Content: "hi"}, {Role: "assistant", Content: "hello"}})
@@ -56,7 +58,7 @@ func TestBranchingCheckpointBranchSwitch(t *testing.T) {
 
 // TestBranchingSwitchMissing: переключение на несуществующую ветку — ошибка.
 func TestBranchingSwitchMissing(t *testing.T) {
-	b := NewBranching()
+	b := context.NewBranching()
 	if err := b.Switch("nope"); err == nil {
 		t.Fatal("ожидали ошибку при переключении на несуществующую ветку")
 	}
@@ -64,7 +66,7 @@ func TestBranchingSwitchMissing(t *testing.T) {
 
 // TestBranchingResetAndNames: Reset возвращает к "main"; Name/Branches работают.
 func TestBranchingResetAndNames(t *testing.T) {
-	b := NewBranching()
+	b := context.NewBranching()
 	if b.Name() != "branch" {
 		t.Fatalf("ожидали имя branch, получили %q", b.Name())
 	}
@@ -83,7 +85,7 @@ func TestBranchingResetAndNames(t *testing.T) {
 
 // TestBranchingAutoNames: пустые имена генерируются автоматически.
 func TestBranchingAutoNames(t *testing.T) {
-	b := NewBranching()
+	b := context.NewBranching()
 	if err := b.Branch(""); err != nil {
 		t.Fatalf("Branch без имени: %v", err)
 	}

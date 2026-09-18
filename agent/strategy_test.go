@@ -1,43 +1,16 @@
 package agent
 
 import (
-	"strings"
+	"aichallenge/llm"
 	"testing"
+
+	"agent/feature/memory"
 )
-
-// TestNewStrategyValid: селектор возвращает стратегии нужного типа по имени.
-func TestNewStrategyValid(t *testing.T) {
-	cfg := DefaultConfig()
-	cases := []struct {
-		name string
-		want string
-	}{
-		{"window", "window"},
-		{"facts", "facts"},
-		{"branch", "branch"},
-	}
-	for _, c := range cases {
-		st, err := NewStrategy(c.name, nil, cfg)
-		if err != nil {
-			t.Fatalf("NewStrategy(%q): %v", c.name, err)
-		}
-		if st.Name() != c.want {
-			t.Fatalf("ожидали имя %q, получили %q", c.want, st.Name())
-		}
-	}
-}
-
-// TestNewStrategyInvalid: невалидное имя — ошибка.
-func TestNewStrategyInvalid(t *testing.T) {
-	if _, err := NewStrategy("bogus", nil, DefaultConfig()); err == nil {
-		t.Fatal("ожидали ошибку для невалидного имени стратегии")
-	}
-}
 
 // TestSetStrategySwitches: SetStrategy переключает активную стратегию и вызывает
 // Reset у предыдущей; пустое имя выключает стратегию.
 func TestSetStrategySwitches(t *testing.T) {
-	a := &Agent{memory: NewInMemory(), cfg: DefaultConfig()}
+	a := &Agent{memory: memory.NewLayeredRAM(), cfg: DefaultConfig()}
 
 	if a.StrategyName() != "" {
 		t.Fatalf("изначально стратегии быть не должно, получили %q", a.StrategyName())
@@ -72,7 +45,7 @@ func TestSetStrategySwitches(t *testing.T) {
 
 // TestSetStrategyInvalid: невалидное имя не меняет активную стратегию.
 func TestSetStrategyInvalid(t *testing.T) {
-	a := &Agent{memory: NewInMemory(), cfg: DefaultConfig()}
+	a := &Agent{memory: memory.NewLayeredRAM(), cfg: DefaultConfig()}
 	_ = a.SetStrategy("window")
 	if err := a.SetStrategy("nope"); err == nil {
 		t.Fatal("ожидали ошибку для невалидного имени")
@@ -82,17 +55,38 @@ func TestSetStrategyInvalid(t *testing.T) {
 	}
 }
 
-// TestAgentStrategyConfigInit: New с заданной ContextStrategy поднимает её,
-// а с пустой — включает legacy-сжатие. Клиент создаётся только при наличии ключа,
-// поэтому строим агента напрямую через NewStrategy.
-func TestAgentStrategyConfigInit(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.ContextStrategy = "branch"
-	st, err := NewStrategy(cfg.ContextStrategy, nil, cfg)
-	if err != nil {
-		t.Fatalf("NewStrategy: %v", err)
+// TestRememberWritesLong: Remember явно пишет в долговременный слой агента.
+func TestRememberWritesLong(t *testing.T) {
+	a := &Agent{memory: memory.NewLayeredRAM(), cfg: DefaultConfig()}
+	if err := a.Remember("profile", "имя", "Анна"); err != nil {
+		t.Fatalf("remember: %v", err)
 	}
-	if !strings.HasPrefix(st.Name(), "branch") {
-		t.Fatalf("ожидали branch, получили %q", st.Name())
+	all, err := a.memory.Long().All()
+	if err != nil || len(all) != 1 {
+		t.Fatalf("ожидали 1 запись long, получили %d / %v", len(all), err)
+	}
+	if all[0].Value != "Анна" {
+		t.Fatalf("неверное значение: %q", all[0].Value)
+	}
+}
+
+// TestResetContextKeepsLong: ResetContext очищает short+working, но НЕ long.
+func TestResetContextKeepsLong(t *testing.T) {
+	a := &Agent{memory: memory.NewLayeredRAM(), cfg: DefaultConfig()}
+	_ = a.memory.Short().Append(llm.Message{Role: "user", Content: "привет"})
+	a.memory.Working().Set("цель", "X")
+	_ = a.Remember("knowledge", "тема", "квантовая физика")
+
+	if err := a.ResetContext(); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if hist, _ := a.memory.Short().Load(); len(hist) != 0 {
+		t.Fatalf("short должна очиститься, получили %d", len(hist))
+	}
+	if a.memory.Working().Count() != 0 {
+		t.Fatalf("working должна очиститься, получили %d", a.memory.Working().Count())
+	}
+	if all, _ := a.memory.Long().All(); len(all) != 1 {
+		t.Fatalf("long должна сохраниться, получили %d", len(all))
 	}
 }

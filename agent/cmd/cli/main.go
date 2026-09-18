@@ -12,10 +12,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"agent"
+	"agent/feature/context"
+	"agent/feature/dialog"
+	"agent/feature/memory"
 )
 
 func main() {
@@ -25,6 +29,7 @@ func main() {
 	compressMode := flag.String("compress", "", "сжатие истории: on|off (перекрывает config.json)")
 	compare := flag.Bool("compare", false, "сравнить ответ и токены со сжатием и без")
 	compareStrategies := flag.Bool("compare-strategies", false, "прогнать сценарий «собираем ТЗ» на всех 3 стратегиях контекста")
+	compareMemory := flag.Bool("compare-memory", false, "сравнить ответы агента с долговременной памятью и без неё")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -32,14 +37,15 @@ func main() {
 		die(err)
 	}
 
-	// Этап 2: история сохраняется в SQLite (cfg.HistoryFile) и переживает перезапуск.
-	mem, err := agent.NewSQLiteMemory(cfg.HistoryFile)
+	// Многослойная память: short- и long-слои в SQLite (переживают перезапуск),
+	// working — в RAM (жизнь одной задачи).
+	mem, err := memory.NewLayeredSQLite(cfg.HistoryFile, cfg.LongMemoryFile)
 	if err != nil {
 		die(err)
 	}
 	defer mem.Close()
 	if *reset {
-		_ = mem.Reset()
+		_ = mem.ResetAll()
 	}
 
 	ag, err := agent.New(cfg, mem)
@@ -47,6 +53,10 @@ func main() {
 		die(err)
 	}
 
+	if *compareMemory {
+		runCompareMemory(cfg)
+		return
+	}
 	if *compareStrategies {
 		runCompareStrategies(cfg)
 		return
@@ -75,8 +85,9 @@ func main() {
 		}
 	}
 	fmt.Printf("Агент запущен (модель %s, история: %s, стратегия: %s).\n", ag.Client().Model(), cfg.HistoryFile, strat)
-	fmt.Println("Команды: /strategy [window|facts|branch], /checkpoint <имя>, /branch <имя>, /switch <имя>, /facts,")
-	fmt.Println("         /reset — очистить историю, /compress — legacy-сжатие, /exit — выход.")
+	fmt.Println("Команды: /strategy [window|facts|branch], /checkpoint <имя>, /branch <имя>, /switch <имя>,")
+	fmt.Println("         /facts, /memory, /remember <тип> <ключ> <значение>, /newtask — начать новую задачу,")
+	fmt.Println("         /reset — очистить короткий+рабочий слои, /reset-all — очистить всё, /compress, /exit.")
 
 	printHistory(ag)
 	sc := bufio.NewScanner(os.Stdin)
@@ -104,7 +115,7 @@ func main() {
 			continue
 		case strings.HasPrefix(line, "/checkpoint"):
 			name := strings.TrimSpace(strings.TrimPrefix(line, "/checkpoint"))
-			br, ok := ag.Strategy().(*agent.Branching)
+			br, ok := ag.Strategy().(*context.Branching)
 			if !ok {
 				fmt.Println("[ветвление не активно — включите /strategy branch]")
 				fmt.Print("> ")
@@ -119,7 +130,7 @@ func main() {
 			continue
 		case strings.HasPrefix(line, "/branch"):
 			name := strings.TrimSpace(strings.TrimPrefix(line, "/branch"))
-			br, ok := ag.Strategy().(*agent.Branching)
+			br, ok := ag.Strategy().(*context.Branching)
 			if !ok {
 				fmt.Println("[ветвление не активно — включите /strategy branch]")
 				fmt.Print("> ")
@@ -134,7 +145,7 @@ func main() {
 			continue
 		case strings.HasPrefix(line, "/switch"):
 			name := strings.TrimSpace(strings.TrimPrefix(line, "/switch"))
-			br, ok := ag.Strategy().(*agent.Branching)
+			br, ok := ag.Strategy().(*context.Branching)
 			if !ok {
 				fmt.Println("[ветвление не активно — включите /strategy branch]")
 				fmt.Print("> ")
@@ -148,13 +159,31 @@ func main() {
 			fmt.Print("> ")
 			continue
 		case strings.HasPrefix(line, "/facts"):
-			fm, ok := ag.Strategy().(*agent.FactsMemory)
-			if !ok {
-				fmt.Println("[Facts не активна — включите /strategy facts]")
+			printMemory(ag)
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/memory"):
+			printMemory(ag)
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/remember"):
+			parts := strings.Fields(line)
+			if len(parts) < 4 {
+				fmt.Println("использование: /remember <тип> <ключ> <значение>  (тип: profile|decision|knowledge|preference)")
 				fmt.Print("> ")
 				continue
 			}
-			fmt.Println(fm.State())
+			kind, key, value := parts[1], parts[2], strings.Join(parts[3:], " ")
+			if err := ag.Remember(kind, key, value); err != nil {
+				fmt.Printf("ошибка: %v\n", err)
+			} else {
+				fmt.Printf("[long-память: %s: %s = %s]\n", kind, key, value)
+			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/newtask"):
+			_ = ag.ResetContext()
+			fmt.Println("[новая задача: короткий и рабочий слои очищены, долговременная память сохранена]")
 			fmt.Print("> ")
 			continue
 		}
@@ -163,8 +192,13 @@ func main() {
 		case "/exit", "/quit", "/q":
 			return
 		case "/reset":
-			_ = mem.Reset()
-			fmt.Println("[история сброшена]")
+			_ = ag.ResetContext()
+			fmt.Println("[история и рабочая память сброшены (long сохранён)]")
+			fmt.Print("> ")
+			continue
+		case "/reset-all":
+			_ = ag.ResetAll()
+			fmt.Println("[вся память, включая долговременную, сброшена]")
 			fmt.Print("> ")
 			continue
 		case "/compress":
@@ -253,6 +287,40 @@ func printHistory(ag *agent.Agent) {
 	fmt.Println("---")
 }
 
+// printMemory выводит снапшот трёх слоёв памяти агента.
+func printMemory(ag *agent.Agent) {
+	m := ag.Memories()
+	hist, _ := m.Short().Load()
+	fmt.Printf("[память] short: %d сообщений | working: %d фактов | long: %d записей\n",
+		len(hist), m.Working().Count(), longCount(m))
+
+	if n := m.Working().Count(); n > 0 {
+		fmt.Println("рабочая память (текущая задача):")
+		keys := make([]string, 0, n)
+		for k := range m.Working().All() {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v, _ := m.Working().Get(k)
+			fmt.Printf("  %s: %s\n", k, v)
+		}
+	}
+
+	all, _ := m.Long().All()
+	if len(all) > 0 {
+		fmt.Println("долговременная память (профиль/решения/знания):")
+		for _, e := range all {
+			fmt.Printf("  [%s] %s: %s\n", e.Kind, e.Key, e.Value)
+		}
+	}
+}
+
+func longCount(m *memory.LayeredMemory) int {
+	all, _ := m.Long().All()
+	return len(all)
+}
+
 // runStats прогоняет три сценария (короткий/длинный/переполненный диалог) против
 // реальной модели и печатает таблицу: как растут токены/стоимость по мере диалога
 // и что происходит при превышении лимита (маленький max_tokens / огромная история).
@@ -316,7 +384,7 @@ func runCompare(ag *agent.Agent) {
 	full := append(append([]llm.Message{}, hist...), llm.Message{Role: "user", Content: input})
 	resFull, errFull := client.ChatResult(full, &llm.Options{MaxTokens: 64})
 
-	cm := agent.NewContextManager(client, 10, 10)
+	cm := context.NewContextManager(client, 10, 10)
 	compressed := cm.Build(hist, input)
 	resCmp, errCmp := client.ChatResult(compressed, &llm.Options{MaxTokens: 64})
 
@@ -385,6 +453,49 @@ func runCompareStrategies(cfg *agent.Config) {
 	fmt.Println()
 }
 
+// runCompareMemory сравнивает ответы агента с долговременной памятью и без неё:
+// в long-слой заранее кладутся профиль/решение/знание, затем задаётся вопрос,
+// требующий их вспомнить.
+func runCompareMemory(cfg *agent.Config) {
+	fmt.Println("\n=== Проверка влияния долговременной памяти (long) ===")
+
+	longMem := memory.NewInMemoryLong()
+	_ = longMem.Put(memory.LongEntry{Kind: memory.KindProfile, Key: "имя", Value: "Анна"})
+	_ = longMem.Put(memory.LongEntry{Kind: memory.KindDecision, Key: "стек", Value: "Go"})
+	_ = longMem.Put(memory.LongEntry{Kind: memory.KindKnowledge, Key: "домен", Value: "финансовые приложения"})
+
+	withLong, err := agent.New(cfg, memory.NewLayered(dialog.NewInMemory(), memory.NewInMemoryWorking(), longMem))
+	if err != nil {
+		fmt.Printf("не удалось создать агента с long: %v\n", err)
+		return
+	}
+	withoutLong, err := agent.New(cfg, memory.NewLayeredRAM())
+	if err != nil {
+		fmt.Printf("не удалось создать агента без long: %v\n", err)
+		return
+	}
+
+	const q = "Как меня зовут, какой стек мы выбрали и в каком домене работаем?"
+	aWith, _ := withLong.Say(q)
+	aWithout, _ := withoutLong.Say(q)
+
+	score := func(text string) float64 {
+		t := strings.ToLower(text)
+		terms := []string{"анна", "go", "финанс"}
+		hit := 0
+		for _, term := range terms {
+			if strings.Contains(t, term) {
+				hit++
+			}
+		}
+		return float64(hit) / float64(len(terms))
+	}
+
+	fmt.Printf("\nС долговременной памятью (recall %.0f%%):\n%s\n", score(aWith.Text)*100, aWith.Text)
+	fmt.Printf("\nБез долговременной памяти (recall %.0f%%):\n%s\n", score(aWithout.Text)*100, aWithout.Text)
+	fmt.Println()
+}
+
 // printStratResult выводит метрики одной стратегии.
 func printStratResult(r agent.StrategyResult) {
 	if r.Error != "" {
@@ -428,8 +539,8 @@ func writeCompareReport(results []agent.StrategyResult) {
 	}
 	sb.WriteString("\n## Ожидаемые тенденции\n\n")
 	sb.WriteString("- **window** — минимум токенов, риск потери ранних фактов при маленьком N.\n")
-	sb.WriteString("- **facts** — баланс: мало токенов на вывод, детали держит, но тратит на извлечение.\n")
-	sb.WriteString("- **branch** — максимум токенов и стабильности в ветке, гибкий UX, сложнее управление.\n")
+	sb.WriteString("- **facts** — баланс: рабочий контекст держит детали задачи.\n")
+	sb.WriteString("- **branch** — максимум токенов и стабильности в ветке, гибкий UX.\n")
 
 	sb.WriteString("\n## Ответы на проверочный вопрос\n\n")
 	for _, r := range results {
