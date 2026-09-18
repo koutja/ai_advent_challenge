@@ -6,15 +6,16 @@
 
 ```
 agent/
-├── agent.go          # ядро: тип Agent (инкапсулирует LLM-клиент + память + контекст)
-├── memory.go         # интерфейс Memory (+ in-memory на Этапе 1, SQLite на Этапе 2)
+├── agent.go          # ядро: тип Agent (LLM-клиент + многослойная память + контекст)
 ├── config.go/json    # настройки
-├── context.go        # интерфейс ContextStrategy + селектор стратегий
-├── window.go         # стратегия SlidingWindow
-├── facts.go          # стратегия FactsMemory (извлечение фактов: LLM / хьюристика)
-├── branch.go         # стратегия Branching (checkpoint/branch/switch)
+├── tokens.go         # оценка токенов и стоимости
+├── compare.go        # сравнение стратегий контекста
+├── feature/
+│   ├── dialog/       # short-term: история текущего диалога (Memory, InMemory, SQLiteMemory)
+│   ├── context/      # стратегии контекста (SlidingWindow / FactsMemory / Branching / ContextManager)
+│   └── memory/       # многослойная память: WorkingStore, LongStore, LayeredMemory, роутинг, extract
 ├── cmd/
-│   ├── cli/main.go   # консольный чат (REPL) + сравнение стратегий
+│   ├── cli/main.go   # консольный чат (REPL) + сравнения
 │   └── web/main.go   # опциональный web-чат (HTTP-сервер)
 └── web/index.html    # страница web-чата
 ```
@@ -30,6 +31,7 @@ go run ./cmd/cli --stats             # сравнение токенов: кор
 go run ./cmd/cli --compare           # сжатие: без сжатия vs со сжатием (Этап 4)
 go run ./cmd/cli --compress off      # запуск без сжатия истории
 go run ./cmd/cli --compare-strategies # прогон сценария «собираем ТЗ» на всех 3 стратегиях
+go run ./cmd/cli --compare-memory    # влияние долговременной памяти на ответы (long vs без)
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
 go run ./cmd/web --strategy branch   # web-чат со стратегией по умолчанию (window|facts|branch)
 make build                           # собрать bin/agent_cli и bin/agent_web
@@ -56,8 +58,11 @@ CLI-сравнение стратегий (`--compare-strategies`) оставл�
 | `/checkpoint <имя>` | сохранить контрольную точку (Branching) |
 | `/branch <имя>` | создать ветку-копию и переключиться (Branching) |
 | `/switch <имя>` | переключиться между ветками (Branching) |
-| `/facts` | показать текущие факты (Facts) |
-| `/reset` | очистить историю |
+| `/facts` `/memory` | показать снапшот слоёв памяти (short/working/long) |
+| `/remember <тип> <ключ> <значение>` | явно сохранить в long-память (profile/decision/knowledge/preference) |
+| `/newtask` | начать новую задачу: очистить short+working, long сохранить |
+| `/reset` | очистить короткий и рабочий слои (long сохранить) |
+| `/reset-all` | очистить всю память, включая долговременную |
 | `/compress` | переключить legacy-сжатие |
 | `/exit` `/quit` `/q` | выйти |
 
@@ -89,6 +94,29 @@ go run ./cmd/cli --compare-strategies
 
 После прогона создаётся отчёт [`plans/compare-context.md`](plans/compare-context.md)
 со сводной таблицей по качеству, стабильности, расходу токенов и числу ходов.
+
+## Модель памяти (memory layers)
+
+Память агента разделена на три независимо хранимых слоя (см. [`feature/memory`](feature/memory) и план [`plans/memory-model-plan.md`](plans/memory-model-plan.md)):
+
+| Слой | Хранит | Где хранится | Жизненный цикл |
+|------|--------|--------------|----------------|
+| **short** — краткосрочная | история текущего диалога | [`feature/dialog`](feature/dialog): SQLite (`history_file`) или RAM | очищается при `/reset`, `/newtask` |
+| **working** — рабочая | данные ТЕКУЩЕЙ задачи: цель, ограничения, дедлайн, решения-в-процессе | [`feature/memory`](feature/memory): RAM (ключ → значение) | очищается при `/newtask`, `/reset` |
+| **long** — долговременная | профиль, принятые решения, знания, предпочтения | [`feature/memory`](feature/memory): SQLite (`long_memory_file`) | переживает перезапуск и `/reset` |
+
+Выбор «что и куда сохраняется» — явный:
+- **short**: каждый ход `user`+`assistant` пишется в `Say()`.
+- **working**: после хода `RouteUserTurn()` извлекает ключевые факты реплики (`цель:`, `ограничение:`, …) и кладёт их в рабочий слой.
+- **long**: только явно — командой `/remember` / эндпоинтом `/remember` (или политикой классификации профиль/решение/знание).
+
+На ответы агента слои влияют через сборку запроса: перед историей диалога вставляются system-блоки долговременной и рабочей памяти ([`LayeredMemory.Prepend`](feature/memory/layered.go)). Проверить влияние:
+
+```bash
+go run ./cmd/cli --compare-memory   # агент с long-памятью vs без неё, оценка recall
+```
+
+Полезные команды REPL: `/memory` (снапшот трёх слоёв), `/remember profile имя Анна`, `/newtask` (новая задача).
 
 ## Настройка (куда идут запросы и ключи)
 

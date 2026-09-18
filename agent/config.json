@@ -1,5 +1,6 @@
 {
   "history_file": "agent_history.db",
+  "long_memory_file": "agent_longterm.db",
   "keep_last": 10,
   "summarize_after": 10,
   "compress": true,
