@@ -13,7 +13,8 @@ agent/
 ├── feature/
 │   ├── dialog/       # short-term: история текущего диалога (Memory, InMemory, SQLiteMemory)
 │   ├── context/      # стратегии контекста (SlidingWindow / FactsMemory / Branching / ContextManager)
-│   └── memory/       # многослойная память: WorkingStore, LongStore, LayeredMemory, роутинг, extract
+│   ├── memory/       # многослойная память: WorkingStore, LongStore, LayeredMemory, роутинг, extract
+│   └── profile/      # персонализация: UserProfile, ProfileStore (SQLite), SystemBlock()
 ├── cmd/
 │   ├── cli/main.go   # консольный чат (REPL) + сравнения
 │   └── web/main.go   # опциональный web-чат (HTTP-сервер)
@@ -32,6 +33,7 @@ go run ./cmd/cli --compare           # сжатие: без сжатия vs со
 go run ./cmd/cli --compress off      # запуск без сжатия истории
 go run ./cmd/cli --compare-strategies # прогон сценария «собираем ТЗ» на всех 3 стратегиях
 go run ./cmd/cli --compare-memory    # влияние долговременной памяти на ответы (long vs без)
+go run ./cmd/cli --compare-profiles  # влияние персонализации (профили terse vs detailed)
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
 go run ./cmd/web --strategy branch   # web-чат со стратегией по умолчанию (window|facts|branch)
 make stop-web                        # остановить ранее запущенный go run ./cmd/web (по порту 8080)
@@ -62,6 +64,8 @@ CLI-сравнение стратегий (`--compare-strategies`) оставл�
 | `/facts` `/memory` | показать снапшот слоёв памяти (short/working/long) |
 | `/remember <тип> <ключ> <значение>` | явно сохранить в long-память (profile/decision/knowledge/preference) |
 | `/newtask` | начать новую задачу: очистить short+working, long сохранить |
+| `/profile` | показать активный профиль |
+| `/profile new \| use \| set \| list` | персонализация: создать из заготовки / переключить / отредактировать / список |
 | `/reset` | очистить короткий и рабочий слои (long сохранить) |
 | `/reset-all` | очистить всю память, включая долговременную |
 | `/compress` | переключить legacy-сжатие |
@@ -123,6 +127,39 @@ go run ./cmd/cli --compare-memory   # агент с long-памятью vs бе�
 очищает short+working, сохраняя long) — наглядная демонстрация процесса управления памятью.
 
 Полезные команды REPL: `/memory` (снапшот трёх слоёв), `/remember profile имя Анна`, `/newtask` (новая задача).
+
+## Персонализация
+
+Поверх многослойной памяти работает персонализация ([`feature/profile`](feature/profile)):
+структурированный **профиль пользователя** подключается **первым system-блоком** к каждому запросу,
+поэтому ассистент автоматически адаптирует стиль, формат и ограничения под пользователя.
+
+Профиль содержит: `id`, `name`, `role`, `language`, `style`, `format`, `constraints`, `expertise`.
+Порядок сборки запроса: **[профиль] → [long-память] → [working-память] → история → ввод**.
+
+Хранение — SQLite (`profile_file`, по умолчанию `agent_profiles.db`), переживает перезапуск.
+Активный профиль задаётся в конфиге (`active_profile`) или командой.
+
+Заготовки профилей (для быстрой демонстрации и сравнения): `kutyakin` (Flutter/Dart-разработчик,
+пример из анкеты), `terse` (максимально кратко), `detailed` (развёрнуто).
+
+Команды REPL:
+- `/profile` / `/profile show` — показать активный профиль;
+- `/profile list` — список сохранённых;
+- `/profile new <template>` — создать и активировать из заготовки (`kutyakin|terse|detailed`);
+- `/profile use <id>` — переключить активный;
+- `/profile set <поле> <значение>` — отредактировать (поля: `style|format|name|role|language|constraint|expertise`).
+
+Web: персонализация — **экран внутри единого SPA** ([`web/index.html`](web/index.html)) по
+hash-маршруту `#/profiles` (кнопка «Профили» в тулбаре). Чат и профили переключаются без
+перезагрузки страницы. Создание из заготовки, переключение активного профиля, редактор полей.
+API: `GET/PUT /profile`, `POST /profile/use`, `POST /profile/template`.
+
+Проверка влияния разных профилей на ответы:
+
+```bash
+go run ./cmd/cli --compare-profiles   # один вопрос, профили terse vs detailed
+```
 
 ## Настройка (куда идут запросы и ключи)
 

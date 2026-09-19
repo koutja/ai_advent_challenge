@@ -10,6 +10,7 @@ import (
 	"agent/feature/context"
 	"agent/feature/dialog"
 	"agent/feature/memory"
+	"agent/feature/profile"
 )
 
 // Agent — отдельная сущность агента. Инкапсулирует:
@@ -27,6 +28,9 @@ type Agent struct {
 	prices    map[string]Price        // цены моделей из ../llm/models.json
 	compress  *context.ContextManager // legacy-сжатие истории; nil — выключено
 	strategy  context.ContextStrategy // активная стратегия контекста; nil — legacy/off
+
+	profiles      profile.Store    // хранилище профилей пользователя (feature/profile)
+	activeProfile *profile.Profile // активный профиль; nil — персонализация выключена
 
 	mu            sync.Mutex
 	currentEvents []context.StrategyEvent     // события активной стратегии за текущий ход Say()
@@ -52,6 +56,20 @@ func New(cfg *Config, mem *memory.LayeredMemory) (*Agent, error) {
 	prices, _ := loadPriceCatalog("../llm/models.json")
 	a := &Agent{client: client, memory: mem, cfg: cfg, prices: prices}
 	a.extractor = memory.NewExtractor(client, cfg.FactsExtractor)
+
+	// Персонализация: открываем хранилище профилей и активируем профиль из конфига.
+	if cfg.ProfileFile != "" {
+		store, err := profile.NewSQLiteStore(cfg.ProfileFile)
+		if err != nil {
+			return nil, err
+		}
+		a.profiles = store
+		if cfg.ActiveProfile != "" {
+			if err := a.SetActiveProfile(cfg.ActiveProfile); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	opts := context.Options{
 		WindowSize:    cfg.WindowSize,
@@ -117,6 +135,45 @@ func (a *Agent) Memories() *memory.LayeredMemory { return a.memory }
 // Memory возвращает краткосрочный слой памяти (история диалога) — для фронтендов,
 // которым нужна история (printHistory в CLI, /history в web).
 func (a *Agent) Memory() dialog.Memory { return a.memory.Short() }
+
+// Profiles возвращает хранилище профилей пользователя (nil — не настроено).
+func (a *Agent) Profiles() profile.Store { return a.profiles }
+
+// ActiveProfile возвращает копию активного профиля (nil — персонализация выключена).
+func (a *Agent) ActiveProfile() *profile.Profile {
+	if a.activeProfile == nil {
+		return nil
+	}
+	c := *a.activeProfile
+	return &c
+}
+
+// SetActiveProfile активирует профиль по ID (загружает его из хранилища).
+func (a *Agent) SetActiveProfile(id string) error {
+	if a.profiles == nil {
+		return errors.New("хранилище профилей не настроено (profile_file)")
+	}
+	p, err := a.profiles.Get(id)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		return fmt.Errorf("профиль %q не найден", id)
+	}
+	a.activeProfile = p
+	return nil
+}
+
+// ClearActiveProfile выключает персонализацию.
+func (a *Agent) ClearActiveProfile() { a.activeProfile = nil }
+
+// SaveProfile сохраняет (создаёт или обновляет) профиль в хранилище.
+func (a *Agent) SaveProfile(p profile.Profile) error {
+	if a.profiles == nil {
+		return errors.New("хранилище профилей не настроено (profile_file)")
+	}
+	return a.profiles.Set(p)
+}
 
 // Prices возвращает карту «id модели → цена» из каталога llm/models.json.
 func (a *Agent) Prices() map[string]Price { return a.prices }
@@ -217,21 +274,8 @@ func (a *Agent) Say(input string) (*Reply, error) {
 		return nil, err
 	}
 
-	// Формируем сообщения для запроса. Приоритет: активная стратегия → legacy-сжатие
-	// (summary) → вся история как есть. Затем в начало добавляются слои памяти.
-	var msgs []llm.Message
-	switch {
-	case a.strategy != nil:
-		msgs = a.strategy.Build(hist, input)
-	case a.compress != nil:
-		msgs = a.compress.Build(hist, input)
-	default:
-		msgs = make([]llm.Message, 0, len(hist)+1)
-		msgs = append(msgs, hist...)
-		msgs = append(msgs, llm.Message{Role: "user", Content: input})
-	}
-	// Инжекция слоёв памяти: system-блок long + system-блок working перед историей.
-	msgs = a.memory.Prepend(msgs)
+	// Собираем сообщения запроса: история (стратегия) + слои памяти + профиль.
+	msgs := a.prepareMessages(hist, input)
 
 	histTokens := MessagesTokens(hist)
 
@@ -274,6 +318,32 @@ func (a *Agent) Say(input string) (*Reply, error) {
 	a.mu.Unlock()
 
 	return &Reply{Text: res.Text, Usage: res, Stats: a.buildStats(res, histTokens), Events: events}, nil
+}
+
+// prepareMessages собирает сообщения запроса в порядке:
+// [профиль] → [long-память] → [working-память] → история (стратегия) → ввод.
+// Приоритет истории: активная стратегия → legacy-сжатие → вся история как есть.
+func (a *Agent) prepareMessages(hist []llm.Message, input string) []llm.Message {
+	var msgs []llm.Message
+	switch {
+	case a.strategy != nil:
+		msgs = a.strategy.Build(hist, input)
+	case a.compress != nil:
+		msgs = a.compress.Build(hist, input)
+	default:
+		msgs = make([]llm.Message, 0, len(hist)+1)
+		msgs = append(msgs, hist...)
+		msgs = append(msgs, llm.Message{Role: "user", Content: input})
+	}
+	// Инжекция слоёв памяти: system-блок long + system-блок working перед историей.
+	msgs = a.memory.Prepend(msgs)
+	// Персонализация: активный профиль — самый первый system-блок (приоритет над памятью).
+	if a.activeProfile != nil {
+		if block := a.activeProfile.SystemBlock(); block != "" {
+			msgs = append([]llm.Message{{Role: "system", Content: block}}, msgs...)
+		}
+	}
+	return msgs
 }
 
 // strategyHist возвращает историю, релевантную для активной стратегии.

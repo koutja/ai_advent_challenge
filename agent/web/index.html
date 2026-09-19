@@ -44,6 +44,26 @@
     .mem-actions h3 { margin: 0 0 .2rem; font-size: .85rem; }
     .mem-actions select, .mem-actions input { width: 100%; }
     .btn-secondary { background: #5f6368; }
+    .btn-row { display: flex; gap: .4rem; flex-wrap: wrap; }
+    .btn-sm { padding: .3rem .6rem; font-size: .78rem; background: #7a5cd6; }
+    .prof-block { white-space: pre-wrap; }
+    /* Экран «Профили» внутри SPA */
+    .prof-screen { padding: 1rem 1.5rem; max-width: 920px; }
+    .prof-screen .card { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    .prof-screen .card h2 { margin: 0 0 .6rem; font-size: 1rem; }
+    .prof-screen .note { font-size: .82rem; color: #666; margin: 0 0 .7rem; }
+    .prof { white-space: pre-wrap; font-size: .88rem; background: #fafbfc; border: 1px solid #eef0f3; border-radius: 8px; padding: .7rem; }
+    ul.profiles { list-style: none; margin: 0; padding: 0; }
+    ul.profiles li { display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem; border: 1px solid #eef0f3; border-radius: 8px; margin-bottom: .5rem; }
+    ul.profiles li.active { border-color: #7a5cd6; background: #f6f2ff; }
+    ul.profiles li .info { flex: 1; }
+    ul.profiles li .info b { font-size: .92rem; }
+    ul.profiles li .info span { display: block; font-size: .8rem; color: #666; }
+    .prof-screen label { display: block; font-size: .82rem; color: #555; margin: .5rem 0 .2rem; }
+    .prof-screen input, .prof-screen textarea { width: 100%; padding: .45rem .5rem; border: 1px solid #ccc; border-radius: 6px; font: inherit; }
+    .prof-screen textarea { min-height: 54px; resize: vertical; }
+    .prof-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+    button.ghost { background: #5f6368; }
     .empty { color: #999; font-size: .9rem; }
     .metric { margin: .7rem 0; }
     .metric .label { display: flex; justify-content: space-between; font-size: .85rem; color: #555; margin-bottom: .25rem; }
@@ -78,11 +98,13 @@
     </select>
     <button id="applyStrategy" type="button">Применить</button>
     <span id="strategyStatus" class="status"></span>
+    <button id="navProfiles" type="button">👤 Профили</button>
+    <button id="navChat" type="button" style="display:none">💬 Чат</button>
     <span style="flex:1"></span>
     <button id="newDialog" type="button">＋ Новый диалог</button>
   </div>
 
-  <div class="layout">
+  <div class="layout" id="layout">
     <div id="chat">
       <div id="log"></div>
       <div class="hint">🔎 Живой лог стратегии появляется в чате по мере ответа: делаю · ⚠ внимание · ⏳ скоро.</div>
@@ -164,8 +186,55 @@
         <button id="memNewTask" type="button" class="btn-secondary">＋ Новая задача (short+working очистятся, long останется)</button>
       </div>
     </aside>
+
     </div>
   </div>
+
+  <section id="screenProfiles" class="prof-screen" style="display:none">
+    <div class="card">
+      <h2>Активный профиль</h2>
+      <p class="note">Профиль подключается первым system-блоком к каждому запросу:
+        <b>[профиль] → [long-память] → [working] → история → ввод</b>. Ассистент автоматически
+        соблюдает стиль, формат и ограничения профиля.</p>
+      <div id="activeBlock" class="prof">не выбран</div>
+    </div>
+
+    <div class="card">
+      <h2>Создать из заготовки</h2>
+      <p class="note">Готовые профили: <b>kutyakin</b> (Flutter/Dart, пример по анкете),
+        <b>terse</b>, <b>detailed</b>.</p>
+      <div id="templates" class="btn-row"></div>
+    </div>
+
+    <div class="card">
+      <h2>Сохранённые профили</h2>
+      <ul id="profileList" class="profiles"><li class="note">загрузка…</li></ul>
+    </div>
+
+    <div class="card">
+      <h2>Редактор</h2>
+      <div class="prof-grid">
+        <div>
+          <label>ID</label><input id="fId" placeholder="напр. my-profile">
+          <label>Имя</label><input id="fName" placeholder="Михаил Кутякин">
+          <label>Роль</label><input id="fRole" placeholder="Flutter/Dart разработчик">
+          <label>Язык ответов</label><input id="fLang" placeholder="русский">
+        </div>
+        <div>
+          <label>Стиль</label><input id="fStyle" placeholder="кратко, технично">
+          <label>Формат</label><input id="fFormat" placeholder="списками, с кодом">
+          <label>Ограничения (по строке)</label>
+          <textarea id="fConstraints" placeholder="без воды&#10;не генерировать лишний код"></textarea>
+          <label>Экспертиза (по строке)</label>
+          <textarea id="fExpertise" placeholder="Dart/Flutter&#10;bloc/cubit"></textarea>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button id="btnNew" type="button">＋ Создать новый</button>
+        <button id="btnSave" type="button" class="ghost">💾 Сохранить</button>
+      </div>
+    </div>
+  </section>
 
   <div id="toasts"></div>
 
@@ -401,10 +470,163 @@
       }
     });
 
+    // ---- SPA-навигация: чат ⇄ профили (hash-роутинг) ----
+    const screenProfiles = document.getElementById('screenProfiles');
+    const layoutEl = document.getElementById('layout');
+    const navProfiles = document.getElementById('navProfiles');
+    const navChat = document.getElementById('navChat');
+    let activeProf = null;
+
+    function route() {
+      const h = location.hash || '#/';
+      if (h.indexOf('#/profiles') === 0) {
+        layoutEl.style.display = 'none';
+        screenProfiles.style.display = 'block';
+        navProfiles.style.display = 'none';
+        navChat.style.display = 'inline-block';
+        loadProfiles();
+      } else {
+        layoutEl.style.display = 'flex';
+        screenProfiles.style.display = 'none';
+        navChat.style.display = 'none';
+        navProfiles.style.display = 'inline-block';
+      }
+    }
+    window.addEventListener('hashchange', route);
+    navProfiles.addEventListener('click', () => { location.hash = '#/profiles'; });
+    navChat.addEventListener('click', () => { location.hash = '#/'; });
+
+    // ---- Экран «Профили» ----
+    function renderActive(p) {
+      activeProf = p || null;
+      if (!p || !p.id) { $s('activeBlock').textContent = 'не выбран'; return; }
+      const lines = ['Профиль пользователя: ' + (p.name || p.id)];
+      if (p.role) lines.push('роль: ' + p.role);
+      if (p.language) lines.push('язык: ' + p.language);
+      if (p.style) lines.push('стиль: ' + p.style);
+      if (p.format) lines.push('формат: ' + p.format);
+      if (p.constraints && p.constraints.length) lines.push('ограничения: ' + p.constraints.join('; '));
+      if (p.expertise && p.expertise.length) lines.push('экспертиза: ' + p.expertise.join('; '));
+      $s('activeBlock').textContent = lines.join('\n');
+    }
+
+    function fillForm(p) {
+      $s('fId').value = p ? p.id : '';
+      $s('fName').value = p ? p.name || '' : '';
+      $s('fRole').value = p ? p.role || '' : '';
+      $s('fLang').value = p ? p.language || '' : '';
+      $s('fStyle').value = p ? p.style || '' : '';
+      $s('fFormat').value = p ? p.format || '' : '';
+      $s('fConstraints').value = p ? (p.constraints || []).join('\n') : '';
+      $s('fExpertise').value = p ? (p.expertise || []).join('\n') : '';
+    }
+
+    async function loadProfiles() {
+      try {
+        const resp = await fetch('/profile');
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        renderActive(data.current);
+        fillForm(data.current);
+
+        $s('templates').innerHTML = '';
+        (data.templates || []).forEach(id => {
+          const b = document.createElement('button');
+          b.className = 'btn-sm';
+          b.textContent = '＋ ' + id;
+          b.onclick = () => createTemplate(id);
+          $s('templates').appendChild(b);
+        });
+
+        const ul = $s('profileList');
+        ul.innerHTML = '';
+        (data.profiles || []).forEach(p => {
+          const li = document.createElement('li');
+          if (data.current && data.current.id === p.id) li.className = 'active';
+          const info = document.createElement('div');
+          info.className = 'info';
+          const b = document.createElement('b'); b.textContent = p.id; info.appendChild(b);
+          const s = document.createElement('span'); s.textContent = [p.name, p.style].filter(Boolean).join(' · '); info.appendChild(s);
+          li.appendChild(info);
+          const edit = document.createElement('button');
+          edit.className = 'ghost btn-sm'; edit.textContent = '✎';
+          edit.onclick = () => fillForm(p);
+          const use = document.createElement('button');
+          use.className = 'btn-sm'; use.textContent = 'Активировать';
+          use.onclick = () => useProfile(p.id);
+          li.appendChild(edit); li.appendChild(use);
+          ul.appendChild(li);
+        });
+      } catch (err) {
+        showToast('ошибка загрузки профилей: ' + String(err && err.message || err), 'error');
+      }
+    }
+
+    async function createTemplate(id) {
+      try {
+        const resp = await fetch('/profile/template', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        showToast('Профиль «' + id + '» создан и активирован', 'success');
+        await loadProfiles();
+      } catch (err) { showToast('ошибка: ' + String(err && err.message || err), 'error'); }
+    }
+
+    async function useProfile(id) {
+      try {
+        const resp = await fetch('/profile/use', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        showToast('Активный профиль: ' + id, 'success');
+        await loadProfiles();
+      } catch (err) { showToast('ошибка: ' + String(err && err.message || err), 'error'); }
+    }
+
+    function readProfileForm() {
+      const split = v => v.split('\n').map(s => s.trim()).filter(Boolean);
+      return {
+        id: $s('fId').value.trim(),
+        name: $s('fName').value.trim(),
+        role: $s('fRole').value.trim(),
+        language: $s('fLang').value.trim(),
+        style: $s('fStyle').value.trim(),
+        format: $s('fFormat').value.trim(),
+        constraints: split($s('fConstraints').value),
+        expertise: split($s('fExpertise').value),
+      };
+    }
+
+    $s('btnSave').addEventListener('click', async () => {
+      const p = readProfileForm();
+      if (!p.id) { showToast('Укажите ID', 'warn'); return; }
+      try {
+        const resp = await fetch('/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+        if (!resp.ok) throw new Error(await resp.text());
+        showToast('Профиль «' + p.id + '» сохранён', 'success');
+        await loadProfiles();
+      } catch (err) { showToast('ошибка: ' + String(err && err.message || err), 'error'); }
+    });
+
+    $s('btnNew').addEventListener('click', async () => {
+      const p = readProfileForm();
+      if (!p.id) { showToast('Укажите ID нового профиля', 'warn'); return; }
+      try {
+        const resp = await fetch('/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+        if (!resp.ok) throw new Error(await resp.text());
+        await useProfile(p.id);
+      } catch (err) { showToast('ошибка: ' + String(err && err.message || err), 'error'); }
+    });
+
+    // Короткий алиас getElementById для экрана профилей.
+    function $s(id) { return document.getElementById(id); }
+
     // ---- Инициализация ----
     loadHistory();
     loadStrategy();
     loadMemory();
+    route();
     applyBtn.addEventListener('click', applyStrategy);
 
     // Новый диалог: очищает историю, контекст и состояние стратегии.

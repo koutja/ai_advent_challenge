@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-web stop-web build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-web stop-web build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -19,6 +19,10 @@ run-compare-strategies:
 # ===== Сравнение влияния долговременной памяти (long vs без) =====
 run-compare-memory:
 	go run ./cmd/cli --compare-memory
+
+# ===== Сравнение персонализации (профили terse vs detailed) =====
+run-compare-profiles:
+	go run ./cmd/cli --compare-profiles
 
 # ===== Веб-интерфейс (опционально) =====
 run-web:

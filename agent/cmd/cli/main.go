@@ -20,6 +20,7 @@ import (
 	"agent/feature/context"
 	"agent/feature/dialog"
 	"agent/feature/memory"
+	"agent/feature/profile"
 )
 
 func main() {
@@ -30,6 +31,7 @@ func main() {
 	compare := flag.Bool("compare", false, "сравнить ответ и токены со сжатием и без")
 	compareStrategies := flag.Bool("compare-strategies", false, "прогнать сценарий «собираем ТЗ» на всех 3 стратегиях контекста")
 	compareMemory := flag.Bool("compare-memory", false, "сравнить ответы агента с долговременной памятью и без неё")
+	compareProfiles := flag.Bool("compare-profiles", false, "сравнить ответы агента под разными профилями (terse vs detailed)")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -55,6 +57,10 @@ func main() {
 
 	if *compareMemory {
 		runCompareMemory(cfg)
+		return
+	}
+	if *compareProfiles {
+		runCompareProfiles(cfg)
 		return
 	}
 	if *compareStrategies {
@@ -156,6 +162,10 @@ func main() {
 			} else {
 				fmt.Printf("[активная ветка: %s]\n", br.Active())
 			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/profile"):
+			handleProfileCmd(ag, line)
 			fmt.Print("> ")
 			continue
 		case strings.HasPrefix(line, "/facts"):
@@ -319,6 +329,134 @@ func printMemory(ag *agent.Agent) {
 func longCount(m *memory.LayeredMemory) int {
 	all, _ := m.Long().All()
 	return len(all)
+}
+
+// handleProfileCmd обрабатывает команду /profile: show|list|new|use|set.
+func handleProfileCmd(ag *agent.Agent, line string) {
+	parts := strings.Fields(line)
+	sub := ""
+	if len(parts) >= 2 {
+		sub = parts[1]
+	}
+	switch sub {
+	case "", "show":
+		printProfile(ag, ag.ActiveProfile())
+	case "list":
+		if ag.Profiles() == nil {
+			fmt.Println("[хранилище профилей не настроено (profile_file)]")
+			return
+		}
+		list, _ := ag.Profiles().List()
+		if len(list) == 0 {
+			fmt.Println("[профилей нет — создайте: /profile new kutyakin]")
+			return
+		}
+		active := ""
+		if ap := ag.ActiveProfile(); ap != nil {
+			active = ap.ID
+		}
+		fmt.Println("профили:")
+		for _, p := range list {
+			mark := " "
+			if p.ID == active {
+				mark = "*"
+			}
+			fmt.Printf("  %s %-12s %s\n", mark, p.ID, p.Name)
+		}
+	case "new":
+		if len(parts) < 3 {
+			fmt.Printf("использование: /profile new <template> (%s)\n", strings.Join(profile.TemplateNames(), "|"))
+			return
+		}
+		tpl, ok := profile.Templates()[parts[2]]
+		if !ok {
+			fmt.Printf("нет заготовки %q (есть: %s)\n", parts[2], strings.Join(profile.TemplateNames(), ", "))
+			return
+		}
+		if err := ag.SaveProfile(tpl); err != nil {
+			fmt.Printf("ошибка: %v\n", err)
+			return
+		}
+		_ = ag.SetActiveProfile(tpl.ID)
+		fmt.Printf("[профиль %q создан и активирован]\n", tpl.ID)
+	case "use":
+		if len(parts) < 3 {
+			fmt.Println("использование: /profile use <id>")
+			return
+		}
+		if err := ag.SetActiveProfile(parts[2]); err != nil {
+			fmt.Printf("ошибка: %v\n", err)
+			return
+		}
+		fmt.Printf("[активный профиль: %s]\n", parts[2])
+	case "set":
+		if len(parts) < 4 {
+			fmt.Println("использование: /profile set <поле> <значение>  (поля: style|format|name|role|language|constraint|expertise)")
+			return
+		}
+		p := ag.ActiveProfile()
+		if p == nil {
+			fmt.Println("[активного профиля нет — сначала /profile new kutyakin]")
+			return
+		}
+		if !p.SetField(parts[2], strings.Join(parts[3:], " ")) {
+			fmt.Println("неизвестное поле: " + parts[2])
+			return
+		}
+		if err := ag.SaveProfile(*p); err != nil {
+			fmt.Printf("ошибка: %v\n", err)
+			return
+		}
+		fmt.Println("[профиль обновлён]")
+	default:
+		fmt.Println("подкоманды: show | list | new <template> | use <id> | set <поле> <значение>")
+	}
+}
+
+// printProfile печатает активный профиль (или сообщение, что его нет).
+func printProfile(ag *agent.Agent, p *profile.Profile) {
+	if p == nil {
+		fmt.Println("[активного профиля нет — включите персонализацию: /profile new kutyakin]")
+		return
+	}
+	fmt.Printf("[профиль: %s]\n", p.SystemBlock())
+}
+
+// runCompareProfiles — проверка влияния персонализации: один вопрос задаётся
+// агенту под двумя разными профилями (terse vs detailed), выводится длина ответов
+// и делается эвристический вывод о том, что профиль учтён автоматически.
+func runCompareProfiles(cfg *agent.Config) {
+	fmt.Println("\n=== Сравнение персонализации: профили terse vs detailed ===")
+	const q = "Как выбрать state-менеджер для Flutter-приложения?"
+	ids := []string{"terse", "detailed"}
+
+	answers := map[string]string{}
+	for _, id := range ids {
+		ag, err := agent.New(cfg, memory.NewLayeredRAM())
+		if err != nil {
+			fmt.Printf("профиль %s: не удалось создать агента: %v\n", id, err)
+			continue
+		}
+		tpl := profile.Templates()[id]
+		if err := ag.SaveProfile(tpl); err != nil {
+			fmt.Printf("профиль %s: ошибка сохранения: %v\n", id, err)
+			continue
+		}
+		_ = ag.SetActiveProfile(id)
+		reply, err := ag.Say(q)
+		if err != nil {
+			fmt.Printf("профиль %s: ошибка хода: %v\n", id, err)
+			continue
+		}
+		answers[id] = reply.Text
+		fmt.Printf("\n--- Ответ с профилем %q ---\n%s\n", id, reply.Text)
+	}
+
+	if len(answers) == 2 {
+		l1, l2 := len([]rune(answers["terse"])), len([]rune(answers["detailed"]))
+		fmt.Printf("\nИтог: terse=%d симв., detailed=%d симв. (профиль учтён, если стиль/объём различаются)\n", l1, l2)
+	}
+	fmt.Println()
 }
 
 // runStats прогоняет три сценария (короткий/длинный/переполненный диалог) против

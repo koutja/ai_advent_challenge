@@ -12,6 +12,7 @@ package main
 import (
 	"agent/feature/context"
 	"agent/feature/memory"
+	"agent/feature/profile"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -117,6 +118,9 @@ func main() {
 	http.HandleFunc("/memory", handleMemory)
 	http.HandleFunc("/remember", handleRemember)
 	http.HandleFunc("/newtask", handleNewTask)
+	http.HandleFunc("/profile", handleProfile)
+	http.HandleFunc("/profile/use", handleProfileUse)
+	http.HandleFunc("/profile/template", handleProfileTemplate)
 	http.HandleFunc("/compare", handleCompare)
 	http.HandleFunc("/compare/stream", handleCompareStream)
 	http.Handle("/", http.FileServer(http.Dir(*webDir)))
@@ -439,6 +443,86 @@ func handleNewTask(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleProfile: GET — активный профиль, список профилей и имена заготовок;
+// PUT — сохранить (создать/обновить) профиль.
+func handleProfile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	switch r.Method {
+	case http.MethodGet:
+		var list []profile.Profile
+		if ag.Profiles() != nil {
+			list, _ = ag.Profiles().List()
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"current":   ag.ActiveProfile(),
+			"profiles":  list,
+			"templates": profile.TemplateNames(),
+		})
+	case http.MethodPut:
+		var p profile.Profile
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
+			return
+		}
+		if err := ag.SaveProfile(p); err != nil {
+			http.Error(w, safeError(err), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	default:
+		http.Error(w, "ожидается GET или PUT", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleProfileUse: POST {"id":"..."} — активировать профиль.
+func handleProfileUse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "ожидается POST", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
+		return
+	}
+	if err := ag.SetActiveProfile(req.ID); err != nil {
+		http.Error(w, safeError(err), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "current": req.ID})
+}
+
+// handleProfileTemplate: POST {"id":"kutyakin"} — создать профиль из заготовки и активировать.
+func handleProfileTemplate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "ожидается POST", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
+		return
+	}
+	tpl, ok := profile.Templates()[req.ID]
+	if !ok {
+		http.Error(w, "нет такой заготовки: "+req.ID, http.StatusBadRequest)
+		return
+	}
+	if err := ag.SaveProfile(tpl); err != nil {
+		http.Error(w, safeError(err), http.StatusInternalServerError)
+		return
+	}
+	_ = ag.SetActiveProfile(tpl.ID)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "current": tpl.ID})
 }
 
 // urlHostInErr находит начало URL вместе с хостом (без пути) и query.

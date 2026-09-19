@@ -20,6 +20,8 @@ import (
 type Config struct {
 	HistoryFile    string `json:"history_file"`     // путь к БД истории (short-слой, SQLite)
 	LongMemoryFile string `json:"long_memory_file"` // путь к БД долговременной памяти (long-слой, SQLite)
+	ProfileFile    string `json:"profile_file"`     // путь к БД профилей пользователя (feature/profile)
+	ActiveProfile  string `json:"active_profile"`   // id активного профиля (пусто — без персонализации)
 	KeepLast       int    `json:"keep_last"`        // сколько последних сообщений хранить "как есть" (Этап 4)
 	SummarizeAfter int    `json:"summarize_after"`  // когда остальное уходит в summary (Этап 4)
 	Compress       bool   `json:"compress"`         // сжатие истории включено (Этап 4)
@@ -42,6 +44,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		HistoryFile:     "agent_history.db",
 		LongMemoryFile:  "agent_longterm.db",
+		ProfileFile:     "agent_profiles.db",
 		KeepLast:        10,
 		SummarizeAfter:  10,
 		Compress:        true,
