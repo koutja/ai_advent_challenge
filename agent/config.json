@@ -3,6 +3,7 @@
   "long_memory_file": "agent_longterm.db",
   "profile_file": "agent_profiles.db",
   "active_profile": "",
+  "task_file": "agent_task.db",
   "keep_last": 10,
   "summarize_after": 10,
   "compress": true,

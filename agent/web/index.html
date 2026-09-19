@@ -78,6 +78,11 @@
     .totals div { display: flex; justify-content: space-between; margin: .3rem 0; }
     .totals .sec { font-weight: 600; border-bottom: 1px solid #eef0f3; margin-top: .5rem; }
     /* Состояние задачи: закреплённая полоска над логом чата */
+    #taskBar { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .6rem; }
+    #taskBar .tb-title { font-size: .85rem; color: #555; font-weight: 600; }
+    #taskBar button { padding: .3rem .7rem; font-size: .8rem; background: #eef4ff; color: #1a73e8; border: 1px solid #cfe0ff; border-radius: 999px; cursor: pointer; }
+    #taskBar button:hover { background: #dfe9ff; }
+    #taskBar button:disabled { opacity: .45; cursor: not-allowed; }
     #taskBanner { margin-bottom: .6rem; padding: .55rem .7rem; border-radius: 8px; background: #eef4ff; border: 1px solid #cfe0ff; font-size: .85rem; line-height: 1.55; }
     #taskBanner code { background: #e8ecf3; padding: 0 .3rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
     #taskBanner summary { display: inline-block; cursor: pointer; color: #1a73e8; margin-left: .3rem; user-select: none; }
@@ -111,9 +116,19 @@
 
   <div class="layout" id="layout">
     <div id="chat">
-      <div id="taskBanner" style="display:none"></div>
       <div id="log"></div>
-      <div class="hint">Состояние задачи управляется командами в чате: /begin <цель>, /expected <действие>, /step <итог>, /next, /accept, /rework <причина>, /pause, /resume, /task — показать статус.</div>
+      <div id="taskBanner" style="display:none"></div>
+      <div id="taskBar" style="display:none">
+        <span class="tb-title">🎯 Задача:</span>
+        <button id="tbExpected" type="button">✎ Действие</button>
+        <button id="tbStep" type="button">✓ Шаг</button>
+        <button id="tbNext" type="button">→ Этап</button>
+        <button id="tbAccept" type="button">✔ Принять</button>
+        <button id="tbRework" type="button">↩ Доработка</button>
+        <button id="tbPause" type="button">⏸ Пауза</button>
+        <button id="tbResume" type="button">▶ Продолжить</button>
+      </div>
+      <div class="hint">Отправьте первое сообщение — оно начнёт задачу (цель = текст). Дальше шаги и этапы управляются кнопками под чатом (✎ ✓ → ✔ ↩ ⏸).</div>
       <form id="form">
         <input id="msg" type="text" placeholder="Сообщение..." autofocus>
         <button type="submit">Отправить</button>
@@ -479,20 +494,38 @@
 
     // ---- Состояние задачи (FSM): статус в чате + slash-команды ----
     const taskBanner = document.getElementById('taskBanner');
+    const taskBar = document.getElementById('taskBar');
+    let curTask = null;
+
+    function hasActiveTask() {
+      return !!(curTask && curTask.enabled && curTask.stage && !curTask.done);
+    }
 
     function taskStageLabel(s) {
       return { planning: 'планирование', execution: 'исполнение', validation: 'валидация', done: 'выполнено' }[s] || s;
     }
 
-    // renderTaskStatus рисует закреплённый баннер статуса над логом чата.
+    // renderTaskStatus рисует закреплённый баннер и ряд кнопок над логом чата.
+    // Кнопки видны только во время активной задачи; для done — краткий итог.
     function renderTaskStatus(d) {
       if (!d) return;
-      if (!d.enabled) { taskBanner.style.display = 'none'; return; }
-      taskBanner.style.display = 'block';
-      if (!d.stage || d.done) {
-        taskBanner.innerHTML = '<b>🎯 Задача:</b> нет активной — начните <code>/begin <цель></code>';
+      curTask = d;
+      if (!d.enabled || !d.stage) {
+        taskBar.style.display = 'none';
+        taskBanner.style.display = 'none';
         return;
       }
+      if (d.done) {
+        taskBar.style.display = 'none';
+        taskBanner.style.display = 'block';
+        taskBanner.innerHTML = '<b>🎯 Задача:</b> ' + esc(d.goal) + ' · <b>Статус:</b> ✔ выполнено' +
+          (d.log && d.log.length ? ' <details><summary>итоги (' + d.log.length + ')</summary>' +
+            d.log.map(l => '<div class="fact">' + esc(l) + '</div>').join('') + '</details>' : '');
+        return;
+      }
+      taskBar.style.display = 'flex';
+      taskBanner.style.display = 'block';
+      updateTaskButtons(d);
       let h = '<b>🎯 Задача:</b> ' + esc(d.goal) +
         ' · <b>Этап:</b> ' + esc(taskStageLabel(d.stage)) +
         ' · <b>Шаг:</b> ' + (d.step || 1) +
@@ -547,6 +580,55 @@
       }
       return false;
     }
+
+    // ---- Кнопки-шорткаты FSM над чатом ----
+    const btn = {
+      expected: document.getElementById('tbExpected'),
+      step: document.getElementById('tbStep'),
+      next: document.getElementById('tbNext'),
+      accept: document.getElementById('tbAccept'),
+      rework: document.getElementById('tbRework'),
+      pause: document.getElementById('tbPause'),
+      resume: document.getElementById('tbResume'),
+    };
+
+    function setBtn(b, on) { b.disabled = !on; }
+
+    // updateTaskButtons включает/выключает кнопки по текущему состоянию задачи.
+    function updateTaskButtons(d) {
+      if (!d || !d.enabled || !d.stage || d.done) {
+        Object.keys(btn).forEach(k => { btn[k].disabled = true; });
+        return;
+      }
+      const running = !d.paused;
+      setBtn(btn.expected, running);
+      setBtn(btn.step, running);
+      setBtn(btn.next, running);
+      setBtn(btn.accept, running && d.stage === 'validation');
+      setBtn(btn.rework, running && d.stage === 'validation');
+      setBtn(btn.pause, !d.paused);
+      setBtn(btn.resume, d.paused);
+    }
+
+    btn.expected.addEventListener('click', () => {
+      const e = prompt('Ожидаемое действие:', '');
+      if (e === null) return;
+      sendTask('expected', e.trim());
+    });
+    btn.step.addEventListener('click', () => {
+      const s = prompt('Итог шага (можно пусто):', '');
+      if (s === null) return;
+      sendTask('step', s);
+    });
+    btn.next.addEventListener('click', () => sendTask('next'));
+    btn.accept.addEventListener('click', () => sendTask('accept'));
+    btn.rework.addEventListener('click', () => {
+      const r = prompt('Причина возврата в доработку:', '');
+      if (r === null) return;
+      sendTask('rework', r);
+    });
+    btn.pause.addEventListener('click', () => sendTask('pause'));
+    btn.resume.addEventListener('click', () => sendTask('resume'));
 
     // ---- SPA-навигация: чат ⇄ профили (hash-роутинг) ----
     const screenProfiles = document.getElementById('screenProfiles');
@@ -744,6 +826,9 @@
       input.value = '';
       // Slash-команды состояния задачи обрабатываются локально, без вызова LLM.
       if (handleTaskSlash(text)) return;
+      (async () => {
+      // Активной задачи нет — первое сообщение само её начинает (цель = текст).
+      if (!hasActiveTask()) await sendTask('begin', text);
       add('user', text);
       showTyping();
 
@@ -776,6 +861,7 @@
       });
 
       es.onerror = () => {};
+      })();
     });
   </script>
 </body>

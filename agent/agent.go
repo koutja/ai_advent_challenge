@@ -11,6 +11,7 @@ import (
 	"agent/feature/dialog"
 	"agent/feature/memory"
 	"agent/feature/profile"
+	"agent/feature/task"
 )
 
 // Agent — отдельная сущность агента. Инкапсулирует:
@@ -31,6 +32,8 @@ type Agent struct {
 
 	profiles      profile.Store    // хранилище профилей пользователя (feature/profile)
 	activeProfile *profile.Profile // активный профиль; nil — персонализация выключена
+
+	tasks task.Machine // конечный автомат состояния задачи (feature/task); nil — off
 
 	mu            sync.Mutex
 	currentEvents []context.StrategyEvent     // события активной стратегии за текущий ход Say()
@@ -69,6 +72,21 @@ func New(cfg *Config, mem *memory.LayeredMemory) (*Agent, error) {
 				return nil, err
 			}
 		}
+	}
+
+	// Состояние задачи (FSM): открываем хранилище (SQLite — переживает перезапуск)
+	// и восстанавливаем паузу/шаг, если задача была начата ранее.
+	if cfg.TaskFile != "" {
+		store, err := task.NewSQLiteStore(cfg.TaskFile)
+		if err != nil {
+			return nil, err
+		}
+		m, err := task.New(store)
+		if err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+		a.tasks = m
 	}
 
 	opts := context.Options{
@@ -199,6 +217,10 @@ func (a *Agent) ResetContext() error {
 	}
 	if a.strategy != nil {
 		_ = a.strategy.Reset()
+	}
+	// Состояние задачи (FSM) тоже сбрасываем — новый диалог/новая задача.
+	if a.tasks != nil {
+		_ = a.tasks.Reset()
 	}
 	return nil
 }
@@ -337,6 +359,13 @@ func (a *Agent) prepareMessages(hist []llm.Message, input string) []llm.Message 
 	}
 	// Инжекция слоёв памяти: system-блок long + system-блок working перед историей.
 	msgs = a.memory.Prepend(msgs)
+	// Состояние задачи (FSM): текущий этап/шаг/ожидаемое действие — чтобы агент
+	// продолжал задачу без повторных объяснений. Идёт выше памяти, но ниже профиля.
+	if a.tasks != nil {
+		if block := a.tasks.SystemBlock(); block != "" {
+			msgs = append([]llm.Message{{Role: "system", Content: block}}, msgs...)
+		}
+	}
 	// Персонализация: активный профиль — самый первый system-блок (приоритет над памятью).
 	if a.activeProfile != nil {
 		if block := a.activeProfile.SystemBlock(); block != "" {

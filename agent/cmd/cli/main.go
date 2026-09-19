@@ -21,6 +21,7 @@ import (
 	"agent/feature/dialog"
 	"agent/feature/memory"
 	"agent/feature/profile"
+	"agent/feature/task"
 )
 
 func main() {
@@ -94,6 +95,9 @@ func main() {
 	fmt.Println("Команды: /strategy [window|facts|branch], /checkpoint <имя>, /branch <имя>, /switch <имя>,")
 	fmt.Println("         /facts, /memory, /remember <тип> <ключ> <значение>, /newtask — начать новую задачу,")
 	fmt.Println("         /reset — очистить короткий+рабочий слои, /reset-all — очистить всё, /compress, /exit.")
+	fmt.Println("Задача (FSM): /task — состояние, /begin <цель>, /expected <действие>, /step <итог>,")
+	fmt.Println("         /next — следующий этап, /accept — принять (validation→done), /rework <причина>,")
+	fmt.Println("         /pause — пауза, /resume — продолжить.")
 
 	printHistory(ag)
 	sc := bufio.NewScanner(os.Stdin)
@@ -196,6 +200,42 @@ func main() {
 			fmt.Println("[новая задача: короткий и рабочий слои очищены, долговременная память сохранена]")
 			fmt.Print("> ")
 			continue
+		case strings.HasPrefix(line, "/task"):
+			printTaskState(ag)
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/begin"):
+			handleTaskCmd(ag, "begin", strings.TrimSpace(strings.TrimPrefix(line, "/begin")))
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/expected"):
+			handleTaskCmd(ag, "expected", strings.TrimSpace(strings.TrimPrefix(line, "/expected")))
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/step"):
+			handleTaskCmd(ag, "step", strings.TrimSpace(strings.TrimPrefix(line, "/step")))
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/next"):
+			handleTaskCmd(ag, "next", "")
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/accept"):
+			handleTaskCmd(ag, "accept", "")
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/rework"):
+			handleTaskCmd(ag, "rework", strings.TrimSpace(strings.TrimPrefix(line, "/rework")))
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/pause"):
+			handleTaskCmd(ag, "pause", "")
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/resume"):
+			handleTaskCmd(ag, "resume", "")
+			fmt.Print("> ")
+			continue
 		}
 
 		switch line {
@@ -295,6 +335,94 @@ func printHistory(ag *agent.Agent) {
 		fmt.Printf("%s: %s\n", who, m.Content)
 	}
 	fmt.Println("---")
+}
+
+// taskStageLabel — человекочитаемая подпись этапа задачи.
+func taskStageLabel(stage string) string {
+	switch stage {
+	case "planning":
+		return "планирование"
+	case "execution":
+		return "исполнение"
+	case "validation":
+		return "валидация"
+	case "done":
+		return "выполнено"
+	default:
+		return stage
+	}
+}
+
+// printTaskState выводит текущее состояние задачи (FSM) или сообщение, что оно
+// не настроено.
+func printTaskState(ag *agent.Agent) {
+	if !ag.TaskEnabled() {
+		fmt.Println("[состояние задачи не настроено — добавьте task_file в config.json]")
+		return
+	}
+	st := ag.TaskState()
+	if !st.IsActive() {
+		fmt.Println("[активной задачи нет — начните /begin <цель>]")
+		return
+	}
+	fmt.Printf("[задача] цель: %s | этап: %s (%s) | шаг: %d | статус: %s\n",
+		st.Goal, taskStageLabel(st.Stage), st.Stage, st.Step, statusLabel(st))
+	if st.Expected != "" {
+		fmt.Printf("  ожидаемое действие: %s\n", st.Expected)
+	}
+	if len(st.Log) > 0 {
+		fmt.Println("  итоги шагов:")
+		for _, line := range st.Log {
+			fmt.Printf("    - %s\n", line)
+		}
+	}
+}
+
+// statusLabel возвращает подпись статуса задачи (пауза / в работе).
+func statusLabel(st task.State) string {
+	if st.Paused {
+		return "ПАУЗА"
+	}
+	return "в работе"
+}
+
+// handleTaskCmd выполняет команду управления состоянием задачи (FSM).
+// Неизвестная команда или ошибка перехода выводятся пользователю.
+func handleTaskCmd(ag *agent.Agent, cmd, arg string) {
+	if !ag.TaskEnabled() {
+		fmt.Println("[состояние задачи не настроено — добавьте task_file в config.json]")
+		return
+	}
+	m := ag.Task()
+	var err error
+	switch cmd {
+	case "begin":
+		err = ag.BeginTask(arg)
+	case "expected":
+		err = m.SetExpected(arg)
+	case "step":
+		err = m.Advance(arg)
+	case "next":
+		err = m.NextStage()
+	case "accept":
+		st := ag.TaskState()
+		if st.Stage != "validation" {
+			fmt.Println("[принять можно только на этапе валидации]")
+			return
+		}
+		err = m.NextStage()
+	case "rework":
+		err = m.Rework(arg)
+	case "pause":
+		err = m.Pause()
+	case "resume":
+		err = m.Resume()
+	}
+	if err != nil {
+		fmt.Printf("ошибка: %v\n", err)
+		return
+	}
+	printTaskState(ag)
 }
 
 // printMemory выводит снапшот трёх слоёв памяти агента.
