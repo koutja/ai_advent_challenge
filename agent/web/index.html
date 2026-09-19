@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Агент</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
@@ -76,6 +77,10 @@
     .totals { margin-top: 1rem; border-top: 1px solid #eef0f3; padding-top: .6rem; font-size: .9rem; }
     .totals div { display: flex; justify-content: space-between; margin: .3rem 0; }
     .totals .sec { font-weight: 600; border-bottom: 1px solid #eef0f3; margin-top: .5rem; }
+    /* Состояние задачи: закреплённая полоска над логом чата */
+    #taskBanner { margin-bottom: .6rem; padding: .55rem .7rem; border-radius: 8px; background: #eef4ff; border: 1px solid #cfe0ff; font-size: .85rem; line-height: 1.55; }
+    #taskBanner code { background: #e8ecf3; padding: 0 .3rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+    #taskBanner summary { display: inline-block; cursor: pointer; color: #1a73e8; margin-left: .3rem; user-select: none; }
     /* Toasts */
     #toasts { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
     .toast { background: #fff; border: 1px solid #e3e6ea; border-left: 4px solid #1a73e8; border-radius: 8px; padding: .6rem .8rem; box-shadow: 0 4px 12px rgba(0,0,0,.08); font-size: .85rem; display: flex; gap: .6rem; align-items: flex-start; animation: toastIn .25s ease; }
@@ -106,8 +111,9 @@
 
   <div class="layout" id="layout">
     <div id="chat">
+      <div id="taskBanner" style="display:none"></div>
       <div id="log"></div>
-      <div class="hint">🔎 Живой лог стратегии появляется в чате по мере ответа: делаю · ⚠ внимание · ⏳ скоро.</div>
+      <div class="hint">Состояние задачи управляется командами в чате: /begin <цель>, /expected <действие>, /step <итог>, /next, /accept, /rework <причина>, /pause, /resume, /task — показать статус.</div>
       <form id="form">
         <input id="msg" type="text" placeholder="Сообщение..." autofocus>
         <button type="submit">Отправить</button>
@@ -464,11 +470,83 @@
         if (!resp.ok) throw new Error(await resp.text());
         await loadMemory();
         loadHistory(); // перерисовать короткий слой (история очищена)
+        refreshTask(); // состояние задачи сброшено новым диалогом
         showToast('Новая задача: short+working очищены, long сохранён', 'success');
       } catch (err) {
         showToast('не удалось начать новую задачу: ' + String(err && err.message || err), 'error');
       }
     });
+
+    // ---- Состояние задачи (FSM): статус в чате + slash-команды ----
+    const taskBanner = document.getElementById('taskBanner');
+
+    function taskStageLabel(s) {
+      return { planning: 'планирование', execution: 'исполнение', validation: 'валидация', done: 'выполнено' }[s] || s;
+    }
+
+    // renderTaskStatus рисует закреплённый баннер статуса над логом чата.
+    function renderTaskStatus(d) {
+      if (!d) return;
+      if (!d.enabled) { taskBanner.style.display = 'none'; return; }
+      taskBanner.style.display = 'block';
+      if (!d.stage || d.done) {
+        taskBanner.innerHTML = '<b>🎯 Задача:</b> нет активной — начните <code>/begin <цель></code>';
+        return;
+      }
+      let h = '<b>🎯 Задача:</b> ' + esc(d.goal) +
+        ' · <b>Этап:</b> ' + esc(taskStageLabel(d.stage)) +
+        ' · <b>Шаг:</b> ' + (d.step || 1) +
+        ' · <b>Статус:</b> ' + (d.paused ? '⏸ ПАУЗА' : 'в работе');
+      if (d.expected) h += ' · <b>Ожидаемое действие:</b> ' + esc(d.expected);
+      if (d.log && d.log.length) {
+        h += ' <details><summary>итоги (' + d.log.length + ')</summary>' +
+          d.log.map(l => '<div class="fact">' + esc(l) + '</div>').join('') + '</details>';
+      }
+      taskBanner.innerHTML = h;
+    }
+
+    // refreshTask обновляет баннер текущим состоянием задачи.
+    async function refreshTask() {
+      try {
+        const resp = await fetch('/task');
+        if (!resp.ok) { taskBanner.style.display = 'none'; return; }
+        renderTaskStatus(await resp.json());
+      } catch (e) { /* игнорируем */ }
+    }
+
+    // sendTask выполняет команду FSM через /task и обновляет баннер.
+    async function sendTask(cmd, arg) {
+      try {
+        const resp = await fetch('/task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cmd: cmd, arg: arg || '' }),
+        });
+        if (!resp.ok) {
+          const t = await resp.text();
+          showToast('ошибка задачи: ' + t, 'error');
+          return;
+        }
+        renderTaskStatus(await resp.json());
+      } catch (e) {
+        showToast('ошибка сети', 'error');
+      }
+    }
+
+    // Slash-команды состояния задачи прямо из поля сообщения чата.
+    const TASK_COMMANDS = ['/begin', '/expected', '/step', '/next', '/accept', '/rework', '/pause', '/resume', '/task'];
+    function handleTaskSlash(line) {
+      for (const c of TASK_COMMANDS) {
+        if (line === c || line.indexOf(c + ' ') === 0) {
+          add('user', line);
+          const cmd = c.slice(1);
+          const arg = line.slice(c.length).trim();
+          sendTask(cmd, arg);
+          return true;
+        }
+      }
+      return false;
+    }
 
     // ---- SPA-навигация: чат ⇄ профили (hash-роутинг) ----
     const screenProfiles = document.getElementById('screenProfiles');
@@ -626,6 +704,7 @@
     loadHistory();
     loadStrategy();
     loadMemory();
+    refreshTask();
     route();
     applyBtn.addEventListener('click', applyStrategy);
 
@@ -642,6 +721,7 @@
         session = { req: 0, resp: 0, cost: 0 };
         document.getElementById('statsEmpty').style.display = 'block';
         document.getElementById('statsBody').style.display = 'none';
+        refreshTask(); // /reset очищает и состояние задачи
         showToast('Диалог начат заново (история и контекст очищены)', 'success');
       } catch (err) {
         showToast('не удалось очистить диалог: ' + String(err && err.message || err), 'error');
@@ -662,6 +742,8 @@
       const text = input.value.trim();
       if (!text) return;
       input.value = '';
+      // Slash-команды состояния задачи обрабатываются локально, без вызова LLM.
+      if (handleTaskSlash(text)) return;
       add('user', text);
       showTyping();
 
@@ -680,6 +762,7 @@
         add('assistant', d.reply || '');
         renderStats(d.stats);
         loadMemory(); // после хода short/working могли измениться
+        refreshTask(); // состояние задачи могло измениться
       });
 
       es.addEventListener('chat_error', (ev) => {

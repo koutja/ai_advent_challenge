@@ -13,12 +13,14 @@ import (
 	"agent/feature/context"
 	"agent/feature/memory"
 	"agent/feature/profile"
+	"agent/feature/task"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -118,15 +120,30 @@ func main() {
 	http.HandleFunc("/memory", handleMemory)
 	http.HandleFunc("/remember", handleRemember)
 	http.HandleFunc("/newtask", handleNewTask)
+	http.HandleFunc("/task", handleTask)
 	http.HandleFunc("/profile", handleProfile)
 	http.HandleFunc("/profile/use", handleProfileUse)
 	http.HandleFunc("/profile/template", handleProfileTemplate)
 	http.HandleFunc("/compare", handleCompare)
 	http.HandleFunc("/compare/stream", handleCompareStream)
+	http.HandleFunc("/favicon.ico", handleFavicon)
 	http.Handle("/", http.FileServer(http.Dir(*webDir)))
 
 	fmt.Printf("Web-интерфейс агента: http://%s (стратегия: %s)\n", *addr, strategyLabel(ag))
 	log.Fatal(http.ListenAndServe(*addr, nil))
+}
+
+// handleFavicon отдаёт заглушку favicon (favicon.svg), чтобы браузеры и агенты
+// не получали 404 на /favicon.ico.
+func handleFavicon(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(filepath.Join(appCfg.WebDir, "favicon.svg"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(data)
 }
 
 // strategyLabel возвращает имя активной стратегии или legacy/off.
@@ -443,6 +460,99 @@ func handleNewTask(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// taskView — JSON-представление состояния задачи для UI.
+type taskView struct {
+	Enabled    bool     `json:"enabled"`
+	Goal       string   `json:"goal,omitempty"`
+	Stage      string   `json:"stage,omitempty"`
+	StageLabel string   `json:"stage_label,omitempty"`
+	Step       int      `json:"step"`
+	Expected   string   `json:"expected,omitempty"`
+	Paused     bool     `json:"paused"`
+	Done       bool     `json:"done"`
+	Log        []string `json:"log,omitempty"`
+}
+
+// taskStateView собирает view из текущего состояния агента.
+func taskStateView() taskView {
+	v := taskView{Enabled: ag.TaskEnabled()}
+	if !v.Enabled {
+		return v
+	}
+	st := ag.TaskState()
+	v.Goal = st.Goal
+	v.Stage = st.Stage
+	v.StageLabel = task.StageLabel(st.Stage)
+	v.Step = st.Step
+	v.Expected = st.Expected
+	v.Paused = st.Paused
+	v.Done = st.Done()
+	v.Log = st.Log
+	return v
+}
+
+type taskCmdReq struct {
+	Cmd string `json:"cmd"`
+	Arg string `json:"arg,omitempty"`
+}
+
+// handleTask: GET — вернуть состояние задачи (FSM); POST {"cmd","arg"} —
+// выполнить команду (begin/expected/step/next/accept/rework/pause/resume) и
+// вернуть обновлённое состояние.
+func handleTask(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	switch r.Method {
+	case http.MethodGet:
+		_ = json.NewEncoder(w).Encode(taskStateView())
+		return
+	case http.MethodPost:
+		if !ag.TaskEnabled() {
+			http.Error(w, "состояние задачи не настроено (task_file)", http.StatusBadRequest)
+			return
+		}
+		var req taskCmdReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
+			return
+		}
+		m := ag.Task()
+		var err error
+		switch req.Cmd {
+		case "begin":
+			err = ag.BeginTask(req.Arg)
+		case "expected":
+			err = m.SetExpected(req.Arg)
+		case "step":
+			err = m.Advance(req.Arg)
+		case "next":
+			err = m.NextStage()
+		case "accept":
+			if st := ag.TaskState(); st.Stage != "validation" {
+				http.Error(w, "принять можно только на этапе валидации", http.StatusBadRequest)
+				return
+			}
+			err = m.NextStage()
+		case "rework":
+			err = m.Rework(req.Arg)
+		case "pause":
+			err = m.Pause()
+		case "resume":
+			err = m.Resume()
+		default:
+			http.Error(w, "неизвестная команда: "+req.Cmd, http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, safeError(err), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(taskStateView())
+	default:
+		http.Error(w, "ожидается GET или POST", http.StatusMethodNotAllowed)
+	}
 }
 
 // handleProfile: GET — активный профиль, список профилей и имена заготовок;
