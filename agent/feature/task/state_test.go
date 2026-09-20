@@ -21,6 +21,28 @@ func must(t *testing.T, err error) {
 	}
 }
 
+// reachExecution переводит задачу в исполнение через утверждение плана.
+func reachExecution(t *testing.T, m Machine) {
+	t.Helper()
+	must(t, m.Begin("g"))
+	must(t, m.ApprovePlan())
+	must(t, m.NextStage())
+}
+
+// reachValidation переводит задачу на этап валидации.
+func reachValidation(t *testing.T, m Machine) {
+	t.Helper()
+	reachExecution(t, m)
+	must(t, m.NextStage())
+}
+
+// finishTask завершает задачу через Accept (единственный путь к done).
+func finishTask(t *testing.T, m Machine) {
+	t.Helper()
+	reachValidation(t, m)
+	must(t, m.Accept())
+}
+
 func TestFullLifecycle(t *testing.T) {
 	m := newTestMachine(t)
 
@@ -36,6 +58,8 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatalf("Advance должен увеличить шаг до 2, получили %d", st.Step)
 	}
 
+	// Реализация только после утверждённого плана.
+	must(t, m.ApprovePlan())
 	must(t, m.NextStage())
 	if st = m.Snapshot(); st.Stage != StageExecution || st.Step != 1 {
 		t.Fatalf("ожидали execution/1, получили %s/%d", st.Stage, st.Step)
@@ -46,19 +70,65 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatalf("ожидали validation/1, получили %s/%d", st.Stage, st.Step)
 	}
 
+	// Финал — только через Accept (валидация).
+	must(t, m.Accept())
+	if st = m.Snapshot(); !st.Done() || !st.Validated {
+		t.Fatalf("ожидали done+validated, получили %s validated=%v", st.Stage, st.Validated)
+	}
+}
+
+func TestPlanningRequiresApproval(t *testing.T) {
+	m := newTestMachine(t)
+	must(t, m.Begin("g"))
+	err := m.NextStage()
+	if err == nil {
+		t.Fatal("реализация без утверждённого плана должна быть отклонена")
+	}
+	te, ok := IsTransitionError(err)
+	if !ok {
+		t.Fatalf("ожидали *TransitionError, получили %T", err)
+	}
+	if te.Transition != TrToExecution || !strings.Contains(te.Hint, "approve") {
+		t.Fatalf("отказ не описывает причину/подсказку: %+v", te)
+	}
+	if !strings.Contains(te.Explanation(), "план не утверждён") {
+		t.Fatalf("Explanation не объясняет причину:\n%s", te.Explanation())
+	}
+
+	// После утверждения плана переход разрешён.
+	must(t, m.ApprovePlan())
 	must(t, m.NextStage())
-	if st = m.Snapshot(); !st.Done() {
-		t.Fatalf("ожидали done, получили %s", st.Stage)
+	if st := m.Snapshot(); st.Stage != StageExecution {
+		t.Fatalf("после утверждения плана ожидали execution, получили %s", st.Stage)
+	}
+}
+
+func TestNoFinalWithoutValidation(t *testing.T) {
+	m := newTestMachine(t)
+	reachValidation(t, m)
+
+	// Попытка «перескочить» финал через NextStage отклоняется.
+	err := m.NextStage()
+	if err == nil {
+		t.Fatal("финал через NextStage должен быть запрещён")
+	}
+	if _, ok := IsTransitionError(err); !ok {
+		t.Fatalf("ожидали *TransitionError, получили %T", err)
+	}
+	if st := m.Snapshot(); st.Stage != StageValidation || st.Done() {
+		t.Fatalf("состояние не должно измениться: %+v", st)
+	}
+
+	// Только Accept завершает задачу и помечает валидацию.
+	must(t, m.Accept())
+	if st := m.Snapshot(); !st.Done() || !st.Validated {
+		t.Fatalf("Accept должен привести к done+validated, получили %+v", st)
 	}
 }
 
 func TestPauseResumeKeepsStepAndExpected(t *testing.T) {
 	m := newTestMachine(t)
-	must(t, m.Begin("задача"))
-	must(t, m.SetExpected("написать код"))
-	must(t, m.Advance("шаг выполнен"))
-	// теперь execution? Нет — Advance остаётся в planning. Перейдём в execution.
-	must(t, m.NextStage())
+	reachExecution(t, m)
 	must(t, m.SetExpected("реализовать модуль"))
 
 	must(t, m.Pause())
@@ -87,21 +157,9 @@ func TestPauseAllowedOnEveryNonDoneStage(t *testing.T) {
 		expectOK bool
 	}{
 		{"planning", func(m Machine) { must(t, m.Begin("g")) }, true},
-		{"execution", func(m Machine) {
-			must(t, m.Begin("g"))
-			must(t, m.NextStage())
-		}, true},
-		{"validation", func(m Machine) {
-			must(t, m.Begin("g"))
-			must(t, m.NextStage())
-			must(t, m.NextStage())
-		}, true},
-		{"done", func(m Machine) {
-			must(t, m.Begin("g"))
-			must(t, m.NextStage())
-			must(t, m.NextStage())
-			must(t, m.NextStage())
-		}, false},
+		{"execution", func(m Machine) { reachExecution(t, m) }, true},
+		{"validation", func(m Machine) { reachValidation(t, m) }, true},
+		{"done", func(m Machine) { finishTask(t, m) }, false},
 	}
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
@@ -121,20 +179,14 @@ func TestPauseAllowedOnEveryNonDoneStage(t *testing.T) {
 func TestIllegalTransitions(t *testing.T) {
 	t.Run("advance in done", func(t *testing.T) {
 		m := newTestMachine(t)
-		must(t, m.Begin("g"))
-		must(t, m.NextStage())
-		must(t, m.NextStage())
-		must(t, m.NextStage())
+		finishTask(t, m)
 		if err := m.Advance("x"); err == nil {
 			t.Fatal("Advance из done должен падать")
 		}
 	})
 	t.Run("nextstage in done", func(t *testing.T) {
 		m := newTestMachine(t)
-		must(t, m.Begin("g"))
-		must(t, m.NextStage())
-		must(t, m.NextStage())
-		must(t, m.NextStage())
+		finishTask(t, m)
 		if err := m.NextStage(); err == nil {
 			t.Fatal("NextStage из done должен падать")
 		}
@@ -156,18 +208,22 @@ func TestIllegalTransitions(t *testing.T) {
 		if err := m.NextStage(); err == nil {
 			t.Fatal("NextStage на паузе должен падать")
 		}
+		if err := m.ApprovePlan(); err == nil {
+			t.Fatal("ApprovePlan на паузе должен падать")
+		}
 	})
 }
 
 func TestReworkReturnsToExecution(t *testing.T) {
 	m := newTestMachine(t)
-	must(t, m.Begin("g"))
-	must(t, m.NextStage())
-	must(t, m.NextStage()) // validation
+	reachValidation(t, m)
 	must(t, m.Rework("тест упал"))
 	st := m.Snapshot()
 	if st.Stage != StageExecution || st.Step != 1 {
 		t.Fatalf("Rework ожидали execution/1, получили %s/%d", st.Stage, st.Step)
+	}
+	if st.Validated {
+		t.Fatal("Rework должен сбросить флаг валидации")
 	}
 	if len(st.Log) == 0 || !strings.Contains(st.Log[len(st.Log)-1], "возврат на доработку") {
 		t.Fatalf("лог должен содержать причину возврата, лог=%v", st.Log)
@@ -179,11 +235,12 @@ func TestSystemBlockCarriesResumeContext(t *testing.T) {
 	must(t, m.Begin("рефакторинг модуля"))
 	must(t, m.SetExpected("выделить интерфейс"))
 	must(t, m.Advance("интерфейс выделен"))
+	must(t, m.ApprovePlan())
 	must(t, m.NextStage())
 	must(t, m.Pause())
 
 	block := m.SystemBlock()
-	for _, want := range []string{"рефакторинг модуля", "execution", "ПАУЗА", "интерфейс выделен"} {
+	for _, want := range []string{"рефакторинг модуля", "execution", "ПАУЗА", "интерфейс выделен", "План утверждён: да"} {
 		if !strings.Contains(block, want) {
 			t.Errorf("SystemBlock должен содержать %q, блок:\n%s", want, block)
 		}
@@ -200,12 +257,16 @@ func TestSystemBlockEmptyWithoutActiveTask(t *testing.T) {
 func TestBeginClearsPreviousState(t *testing.T) {
 	m := newTestMachine(t)
 	must(t, m.Begin("первая"))
+	must(t, m.ApprovePlan())
 	must(t, m.NextStage())
 	must(t, m.Advance("x"))
 	must(t, m.Begin("вторая"))
 	st := m.Snapshot()
 	if st.Goal != "вторая" || st.Stage != StagePlanning || st.Step != 1 {
 		t.Fatalf("Begin не сбросил состояние: %+v", st)
+	}
+	if st.PlanApproved {
+		t.Fatal("Begin должен сбросить флаг утверждённого плана")
 	}
 	if len(st.Log) != 0 {
 		t.Fatalf("Begin должен очистить лог, получили %v", st.Log)

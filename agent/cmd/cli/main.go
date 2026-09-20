@@ -102,7 +102,8 @@ func main() {
 	fmt.Println("         /facts, /memory, /remember <тип> <ключ> <значение>, /newtask — начать новую задачу,")
 	fmt.Println("         /reset — очистить короткий+рабочий слои, /reset-all — очистить всё, /compress, /exit.")
 	fmt.Println("Задача (FSM): /task — состояние, /begin <цель>, /expected <действие>, /step <итог>,")
-	fmt.Println("         /next — следующий этап, /accept — принять (validation→done), /rework <причина>,")
+	fmt.Println("         /approve — утвердить план (до реализации), /next — следующий этап,")
+	fmt.Println("         /accept — принять после валидации (validation→done), /rework <причина>,")
 	fmt.Println("         /pause — пауза, /resume — продолжить.")
 
 	printHistory(ag)
@@ -216,6 +217,10 @@ func main() {
 			continue
 		case strings.HasPrefix(line, "/begin"):
 			handleTaskCmd(ag, "begin", strings.TrimSpace(strings.TrimPrefix(line, "/begin")))
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/approve"):
+			handleTaskCmd(ag, "approve", "")
 			fmt.Print("> ")
 			continue
 		case strings.HasPrefix(line, "/expected"):
@@ -380,6 +385,7 @@ func printTaskState(ag *agent.Agent) {
 	if st.Expected != "" {
 		fmt.Printf("  ожидаемое действие: %s\n", st.Expected)
 	}
+	fmt.Printf("  план утверждён: %v | валидация пройдена: %v\n", st.PlanApproved, st.Validated)
 	if len(st.Log) > 0 {
 		fmt.Println("  итоги шагов:")
 		for _, line := range st.Log {
@@ -408,6 +414,8 @@ func handleTaskCmd(ag *agent.Agent, cmd, arg string) {
 	switch cmd {
 	case "begin":
 		err = ag.BeginTask(arg)
+	case "approve":
+		err = ag.ApproveTask()
 	case "expected":
 		err = m.SetExpected(arg)
 	case "step":
@@ -415,12 +423,8 @@ func handleTaskCmd(ag *agent.Agent, cmd, arg string) {
 	case "next":
 		err = m.NextStage()
 	case "accept":
-		st := ag.TaskState()
-		if st.Stage != "validation" {
-			fmt.Println("[принять можно только на этапе валидации]")
-			return
-		}
-		err = m.NextStage()
+		// Финал — только после валидации (Accept). NextStage из validation запрещён.
+		err = ag.AcceptTask()
 	case "rework":
 		err = m.Rework(arg)
 	case "pause":
@@ -429,10 +433,20 @@ func handleTaskCmd(ag *agent.Agent, cmd, arg string) {
 		err = m.Resume()
 	}
 	if err != nil {
-		fmt.Printf("ошибка: %v\n", err)
+		printTaskErr(err)
 		return
 	}
 	printTaskState(ag)
+}
+
+// printTaskErr выводит структурированный отказ на недопустимый переход
+// (*task.TransitionError) с объяснением и подсказкой; прочие ошибки — как есть.
+func printTaskErr(err error) {
+	if te, ok := task.IsTransitionError(err); ok {
+		fmt.Println(te.Explanation())
+		return
+	}
+	fmt.Printf("ошибка: %v\n", err)
 }
 
 // printMemory выводит снапшот трёх слоёв памяти агента.

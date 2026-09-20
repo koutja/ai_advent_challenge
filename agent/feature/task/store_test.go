@@ -20,6 +20,7 @@ func TestSQLitePersistence(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	must(t, m1.Begin("персистентная задача"))
+	must(t, m1.ApprovePlan())
 	must(t, m1.NextStage()) // execution
 	must(t, m1.Advance("первый шаг"))
 	must(t, m1.SetExpected("второй шаг"))
@@ -45,7 +46,11 @@ func TestSQLitePersistence(t *testing.T) {
 		got.Step != 2 || !got.Paused || got.Expected != "второй шаг" {
 		t.Fatalf("после перезапуска состояние потеряно: %+v", got)
 	}
-	if len(got.Log) != 1 || got.Log[0] == "" {
+	if !got.PlanApproved {
+		t.Fatalf("флаг утверждённого плана не пережил перезапуск: %+v", got)
+	}
+	// Лог: «план утверждён» + «исполнение шаг 1: первый шаг».
+	if len(got.Log) != 2 || got.Log[len(got.Log)-1] == "" {
 		t.Fatalf("лог не восстановился: %v", got.Log)
 	}
 

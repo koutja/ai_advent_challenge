@@ -57,12 +57,14 @@ func StageLabel(stage string) string {
 
 // State — снапшот состояния задачи для отображения, хранения и инжекции в промпт.
 type State struct {
-	Goal     string   // цель задачи (ставится при Begin)
-	Stage    string   // текущий этап: planning | execution | validation | done
-	Step     int      // номер текущего шага внутри этапа (1-based)
-	Expected string   // ожидаемое действие на текущем шаге
-	Paused   bool     // признак паузы
-	Log      []string // краткие итоги выполненных шагов (компактный контекст для resume)
+	Goal         string   // цель задачи (ставится при Begin)
+	Stage        string   // текущий этап: planning | execution | validation | done
+	Step         int      // номер текущего шага внутри этапа (1-based)
+	Expected     string   // ожидаемое действие на текущем шаге
+	Paused       bool     // признак паузы
+	PlanApproved bool     // true — план утверждён (guard для перехода в исполнение)
+	Validated    bool     // true — валидация пройдена (guard для финала)
+	Log          []string // краткие итоги выполненных шагов (компактный контекст для resume)
 }
 
 // Done сообщает, завершена ли задача.
@@ -81,8 +83,13 @@ type Machine interface {
 	// следующему шагу того же этапа. Когда этап исчерпан, переход на следующий
 	// этап делается явно через NextStage.
 	Advance(summary string) error
-	// NextStage переводит на следующий этап: planning→execution→validation→done.
+	// NextStage переводит на следующий этап: planning→execution→validation.
+	// Из validation к финалу идёт только через Accept (финал требует валидации).
 	NextStage() error
+	// ApprovePlan утверждает план на этапе планирования (guard для NextStage→execution).
+	ApprovePlan() error
+	// Accept финализирует задачу из validation→done (прохождение валидации).
+	Accept() error
 	// Rework возвращает из validation обратно в execution (шаг не принят).
 	Rework(reason string) error
 	// Pause приостанавливает задачу на текущем этапе (кроме done).
@@ -122,14 +129,50 @@ func (m *machine) persist() error {
 	return m.store.Save(m.st)
 }
 
+// apply — единый маршрутизатор переходов через таблицу validTransitions:
+// проверяет исходный этап, запускает Guard (предусловия) и применяет Apply.
+// Недопустимый переход/нарушенное предусловие возвращают структурированный
+// *TransitionError с объяснением и подсказкой.
+func (m *machine) apply(id TransitionID) error {
+	tr := findTransition(id)
+	if tr == nil {
+		return fmt.Errorf("неизвестный переход %q", id)
+	}
+	if tr.From != "" && tr.From != m.st.Stage {
+		return &TransitionError{
+			Transition: id, From: tr.From, To: tr.To,
+			Reason: fmt.Sprintf("переход возможен только из этапа %q, сейчас %q", tr.From, m.st.Stage),
+			Hint:   "используйте переход, разрешённый для текущего этапа",
+		}
+	}
+	if tr.Guard != nil {
+		if err := tr.Guard(m.st); err != nil {
+			if te, ok := IsTransitionError(err); ok {
+				// Дозаполняем поля перехода, чтобы отказ был самодостаточным.
+				te.Transition = id
+				if te.From == "" {
+					te.From = tr.From
+				}
+				if te.To == "" {
+					te.To = tr.To
+				}
+				return te
+			}
+			return err
+		}
+	}
+	tr.Apply(&m.st)
+	return m.persist()
+}
+
 // Begin открывает новую задачу. Допустимо из любого состояния (в т.ч. done —
-// начать следующую задачу); сбрасывает лог и шаг.
+// начать следующую задачу); сбрасывает лог, шаг и флаги плана/валидации.
 func (m *machine) Begin(goal string) error {
 	if strings.TrimSpace(goal) == "" {
 		return errors.New("цель задачи пустая")
 	}
-	m.st = State{Goal: strings.TrimSpace(goal), Stage: StagePlanning, Step: 1}
-	return m.persist()
+	m.st.Goal = strings.TrimSpace(goal)
+	return m.apply(TrBegin)
 }
 
 // SetExpected задаёт ожидаемое действие текущего шага.
@@ -158,39 +201,47 @@ func (m *machine) Advance(summary string) error {
 	return m.persist()
 }
 
-// NextStage переводит на следующий этап по StageOrder. Запрещён из done.
+// NextStage переводит на следующий этап. Роутинг по текущему этапу:
+//
+//	planning → execution (guard: план утверждён);
+//	execution → validation;
+//	validation → финал запрещён — только через Accept (валидация обязательна).
 func (m *machine) NextStage() error {
-	if m.st.Done() {
-		return errors.New("задача уже выполнена (done)")
+	switch m.st.Stage {
+	case StagePlanning:
+		return m.apply(TrToExecution)
+	case StageExecution:
+		return m.apply(TrToValidation)
+	case StageValidation:
+		return &TransitionError{
+			Transition: TrFinalize, From: StageValidation, To: StageDone,
+			Reason: "переход к финалу требует прохождения валидации",
+			Hint:   "сначала примите задачу после валидации (Accept / /accept) — финал без валидации запрещён",
+		}
+	default:
+		return &TransitionError{
+			From:   m.st.Stage,
+			Reason: "нельзя перейти на следующий этап из текущего состояния",
+			Hint:   "проверьте этап задачи или начните новую (Begin)",
+		}
 	}
-	if m.st.Paused {
-		return errors.New("задача на паузе: сначала Resume")
-	}
-	i := stageIndex(m.st.Stage)
-	if i < 0 || i >= len(StageOrder)-1 {
-		return fmt.Errorf("нельзя перейти на следующий этап из %q", m.st.Stage)
-	}
-	m.st.Stage = StageOrder[i+1]
-	m.st.Step = 1
-	m.st.Expected = ""
-	return m.persist()
 }
 
-// Rework возвращает задачу из validation обратно в execution (переработка).
+// ApprovePlan утверждает план на этапе планирования. Без этого перейти в
+// исполнение нельзя (guardPlanApproved): «реализация — только после утверждённого плана».
+func (m *machine) ApprovePlan() error { return m.apply(TrApprovePlan) }
+
+// Accept финализирует задачу из validation в done, помечая валидацию пройденной.
+// Единственный путь к done: «финал — только после валидации».
+func (m *machine) Accept() error { return m.apply(TrFinalize) }
+
+// Rework возвращает задачу из validation обратно в execution (переработка),
+// сбрасывая флаг валидации.
 func (m *machine) Rework(reason string) error {
-	if m.st.Stage != StageValidation {
-		return fmt.Errorf("Rework допустим только из %q, сейчас %q", StageValidation, m.st.Stage)
-	}
-	if m.st.Paused {
-		return errors.New("задача на паузе: сначала Resume")
-	}
 	if reason = strings.TrimSpace(reason); reason != "" {
 		m.st.Log = append(m.st.Log, "возврат на доработку: "+reason)
 	}
-	m.st.Stage = StageExecution
-	m.st.Step = 1
-	m.st.Expected = ""
-	return m.persist()
+	return m.apply(TrRework)
 }
 
 // Pause приостанавливает задачу на любом этапе, кроме терминального done.
@@ -246,6 +297,11 @@ func (m *machine) SystemBlock() string {
 	} else {
 		sb.WriteString("- Статус: в работе\n")
 	}
+	sb.WriteString(fmt.Sprintf("- План утверждён: %s\n", yesNo(st.PlanApproved)))
+	if st.Stage == StageValidation || st.Done() {
+		sb.WriteString(fmt.Sprintf("- Валидация пройдена: %s\n", yesNo(st.Validated)))
+	}
+	sb.WriteString("- Переходы контролируются: реализация требует утверждённого плана, финал — валидации.\n")
 	if st.Expected != "" {
 		sb.WriteString("- Ожидаемое действие: " + st.Expected + "\n")
 	}
@@ -256,4 +312,12 @@ func (m *machine) SystemBlock() string {
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// yesNo рендерит булево значение для SystemBlock.
+func yesNo(b bool) string {
+	if b {
+		return "да"
+	}
+	return "нет"
 }

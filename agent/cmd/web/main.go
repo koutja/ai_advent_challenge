@@ -551,15 +551,17 @@ func handleNewTask(w http.ResponseWriter, r *http.Request) {
 
 // taskView — JSON-представление состояния задачи для UI.
 type taskView struct {
-	Enabled    bool     `json:"enabled"`
-	Goal       string   `json:"goal,omitempty"`
-	Stage      string   `json:"stage,omitempty"`
-	StageLabel string   `json:"stage_label,omitempty"`
-	Step       int      `json:"step"`
-	Expected   string   `json:"expected,omitempty"`
-	Paused     bool     `json:"paused"`
-	Done       bool     `json:"done"`
-	Log        []string `json:"log,omitempty"`
+	Enabled      bool     `json:"enabled"`
+	Goal         string   `json:"goal,omitempty"`
+	Stage        string   `json:"stage,omitempty"`
+	StageLabel   string   `json:"stage_label,omitempty"`
+	Step         int      `json:"step"`
+	Expected     string   `json:"expected,omitempty"`
+	Paused       bool     `json:"paused"`
+	PlanApproved bool     `json:"plan_approved"`
+	Validated    bool     `json:"validated"`
+	Done         bool     `json:"done"`
+	Log          []string `json:"log,omitempty"`
 }
 
 // taskStateView собирает view из текущего состояния агента.
@@ -575,6 +577,8 @@ func taskStateView() taskView {
 	v.Step = st.Step
 	v.Expected = st.Expected
 	v.Paused = st.Paused
+	v.PlanApproved = st.PlanApproved
+	v.Validated = st.Validated
 	v.Done = st.Done()
 	v.Log = st.Log
 	return v
@@ -610,6 +614,8 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		switch req.Cmd {
 		case "begin":
 			err = ag.BeginTask(req.Arg)
+		case "approve":
+			err = ag.ApproveTask()
 		case "expected":
 			err = m.SetExpected(req.Arg)
 		case "step":
@@ -617,11 +623,8 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		case "next":
 			err = m.NextStage()
 		case "accept":
-			if st := ag.TaskState(); st.Stage != "validation" {
-				http.Error(w, "принять можно только на этапе валидации", http.StatusBadRequest)
-				return
-			}
-			err = m.NextStage()
+			// Финал — только после валидации (Accept); NextStage из validation запрещён.
+			err = ag.AcceptTask()
 		case "rework":
 			err = m.Rework(req.Arg)
 		case "pause":
@@ -633,6 +636,19 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
+			if te, ok := task.IsTransitionError(err); ok {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error":       te.Error(),
+					"explanation": te.Explanation(),
+					"transition":  string(te.Transition),
+					"from":        te.From,
+					"to":          te.To,
+					"reason":      te.Reason,
+					"hint":        te.Hint,
+				})
+				return
+			}
 			http.Error(w, safeError(err), http.StatusBadRequest)
 			return
 		}

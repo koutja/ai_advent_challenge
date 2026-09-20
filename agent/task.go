@@ -35,5 +35,23 @@ func (a *Agent) BeginTask(goal string) error {
 	return a.tasks.Begin(goal)
 }
 
+// ApproveTask утверждает план на этапе планирования — обязательное предусловие
+// для перехода к реализации (guard to_execution).
+func (a *Agent) ApproveTask() error {
+	if a.tasks == nil {
+		return errTaskDisabled
+	}
+	return a.tasks.ApprovePlan()
+}
+
+// AcceptTask финализирует задачу из validation в done (прохождение валидации).
+// Единственный путь к завершению: финал невозможен без валидации.
+func (a *Agent) AcceptTask() error {
+	if a.tasks == nil {
+		return errTaskDisabled
+	}
+	return a.tasks.Accept()
+}
+
 // TaskEnabled сообщает, настроено ли состояние задачи (task_file).
 func (a *Agent) TaskEnabled() bool { return a.tasks != nil }

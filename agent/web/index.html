@@ -130,6 +130,7 @@
         <span class="tb-title">🎯 Задача:</span>
         <button id="tbExpected" type="button">✎ Действие</button>
         <button id="tbStep" type="button">✓ Шаг</button>
+        <button id="tbApprove" type="button">✔ План</button>
         <button id="tbNext" type="button">→ Этап</button>
         <button id="tbAccept" type="button">✔ Принять</button>
         <button id="tbRework" type="button">↩ Доработка</button>
@@ -625,6 +626,8 @@
         ' · <b>Этап:</b> ' + esc(taskStageLabel(d.stage)) +
         ' · <b>Шаг:</b> ' + (d.step || 1) +
         ' · <b>Статус:</b> ' + (d.paused ? '⏸ ПАУЗА' : 'в работе');
+      if (d.stage === 'planning') h += ' · <b>План:</b> ' + (d.plan_approved ? '✔ утверждён' : '⛔ не утверждён');
+      if (d.stage === 'validation' || d.done) h += ' · <b>Валидация:</b> ' + (d.validated ? '✔ пройдена' : '—');
       if (d.expected) h += ' · <b>Ожидаемое действие:</b> ' + esc(d.expected);
       if (d.log && d.log.length) {
         h += ' <details><summary>итоги (' + d.log.length + ')</summary>' +
@@ -651,6 +654,13 @@
           body: JSON.stringify({ cmd: cmd, arg: arg || '' }),
         });
         if (!resp.ok) {
+          // Структурированный отказ на недопустимый переход (TransitionError).
+          try {
+            const j = await resp.json();
+            if (j && j.explanation) { showToast(j.explanation, 'error'); return; }
+            showToast('ошибка задачи: ' + (j && j.error || resp.statusText), 'error');
+            return;
+          } catch (e) { /* не JSON */ }
           const t = await resp.text();
           showToast('ошибка задачи: ' + t, 'error');
           return;
@@ -662,7 +672,7 @@
     }
 
     // Slash-команды состояния задачи прямо из поля сообщения чата.
-    const TASK_COMMANDS = ['/begin', '/expected', '/step', '/next', '/accept', '/rework', '/pause', '/resume', '/task'];
+    const TASK_COMMANDS = ['/begin', '/approve', '/expected', '/step', '/next', '/accept', '/rework', '/pause', '/resume', '/task'];
     function handleTaskSlash(line) {
       for (const c of TASK_COMMANDS) {
         if (line === c || line.indexOf(c + ' ') === 0) {
@@ -680,6 +690,7 @@
     const btn = {
       expected: document.getElementById('tbExpected'),
       step: document.getElementById('tbStep'),
+      approve: document.getElementById('tbApprove'),
       next: document.getElementById('tbNext'),
       accept: document.getElementById('tbAccept'),
       rework: document.getElementById('tbRework'),
@@ -698,6 +709,8 @@
       const running = !d.paused;
       setBtn(btn.expected, running);
       setBtn(btn.step, running);
+      // План утверждается на этапе планирования (до реализации).
+      setBtn(btn.approve, running && d.stage === 'planning' && !d.plan_approved);
       setBtn(btn.next, running);
       setBtn(btn.accept, running && d.stage === 'validation');
       setBtn(btn.rework, running && d.stage === 'validation');
@@ -715,6 +728,7 @@
       if (s === null) return;
       sendTask('step', s);
     });
+    btn.approve.addEventListener('click', () => sendTask('approve'));
     btn.next.addEventListener('click', () => sendTask('next'));
     btn.accept.addEventListener('click', () => sendTask('accept'));
     btn.rework.addEventListener('click', () => {
