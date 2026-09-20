@@ -24,6 +24,10 @@ run-compare-memory:
 run-compare-profiles:
 	go run ./cmd/cli --compare-profiles
 
+# ===== Проверка инвариантов: конфликт запроса и правила → отказ =====
+run-check-invariants:
+	go run ./cmd/cli --check-invariants
+
 # ===== Веб-интерфейс (опционально) =====
 run-web:
 	go run ./cmd/web
@@ -50,6 +54,7 @@ build:
 test:
 	go test ./...
 
-# ===== Сброс истории (удаление файла SQLite, Этап 2) =====
+# ===== Сброс истории и рабочих БД (удаление файлов SQLite) =====
 reset-history:
 	rm -f agent_history.db
+	rm -f agent_invariants.db

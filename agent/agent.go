@@ -9,6 +9,7 @@ import (
 
 	"agent/feature/context"
 	"agent/feature/dialog"
+	"agent/feature/invariants"
 	"agent/feature/memory"
 	"agent/feature/profile"
 	"agent/feature/task"
@@ -34,6 +35,8 @@ type Agent struct {
 	activeProfile *profile.Profile // активный профиль; nil — персонализация выключена
 
 	tasks task.Machine // конечный автомат состояния задачи (feature/task); nil — off
+
+	invariants *invariants.Manager // менеджер инвариантов (feature/invariants); nil — off
 
 	mu            sync.Mutex
 	currentEvents []context.StrategyEvent     // события активной стратегии за текущий ход Say()
@@ -87,6 +90,22 @@ func New(cfg *Config, mem *memory.LayeredMemory) (*Agent, error) {
 			return nil, err
 		}
 		a.tasks = m
+	}
+
+	// Инварианты: отдельное персистентное хранилище (SQLite — переживает перезапуск).
+	// Если store пуст — засеиваем предзаданными примерами (архитектура/решение/стек/
+	// бизнес-правило), чтобы ассистент «работал в рамках инвариантов» из коробки.
+	if cfg.InvariantsFile != "" {
+		store, err := invariants.NewSQLiteStore(cfg.InvariantsFile)
+		if err != nil {
+			return nil, err
+		}
+		mgr := invariants.NewManager(store)
+		if _, err := mgr.Seed(); err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+		a.invariants = mgr
 	}
 
 	opts := context.Options{
@@ -196,6 +215,9 @@ func (a *Agent) SaveProfile(p profile.Profile) error {
 // Prices возвращает карту «id модели → цена» из каталога llm/models.json.
 func (a *Agent) Prices() map[string]Price { return a.prices }
 
+// Invariants возвращает менеджера инвариантов (nil — не настроено, invariants_file пуст).
+func (a *Agent) Invariants() *invariants.Manager { return a.invariants }
+
 // SetCompress включает/выключает сжатие истории на лету.
 func (a *Agent) SetCompress(on bool) {
 	if on && a.compress == nil {
@@ -289,6 +311,21 @@ func (a *Agent) Say(input string) (*Reply, error) {
 	a.currentEvents = nil
 	a.mu.Unlock()
 
+	// Инварианты: детерминированный pre-check запроса на конфликт с жёсткими
+	// правилами. При hard-конфликте — структурированный отказ БЕЗ обращения к LLM
+	// (экономия токенов и гарантированный отказ от нарушающего решения).
+	if a.invariants != nil {
+		if cs := invariants.HardConflicts(a.invariants.CheckConflict(input)); len(cs) > 0 {
+			text := a.invariants.RefusalTextAll(cs)
+			a.emitEvent(context.StrategyEvent{Kind: context.EventLog,
+				Text: fmt.Sprintf("инварианты: отказ — запрос нарушает %d жёсткое(их) правило(а)", len(cs))})
+			a.mu.Lock()
+			events := append([]context.StrategyEvent{}, a.currentEvents...)
+			a.mu.Unlock()
+			return &Reply{Text: text, Events: events}, nil
+		}
+	}
+
 	// Берём релевантную историю через активную стратегию (для Branching — активная
 	// ветка; иначе — полная история из short-слоя).
 	hist, err := a.strategyHist()
@@ -366,7 +403,16 @@ func (a *Agent) prepareMessages(hist []llm.Message, input string) []llm.Message 
 			msgs = append([]llm.Message{{Role: "system", Content: block}}, msgs...)
 		}
 	}
-	// Персонализация: активный профиль — самый первый system-блок (приоритет над памятью).
+	// Инварианты — самые жёсткие правила, поэтому их system-блок идёт ПЕРВЫМ
+	// (выше профиля и состояния задачи): ассистент обязан учитывать их в каждом
+	// рассуждении и отказываться от решений, которые их нарушают.
+	if a.invariants != nil {
+		if block := a.invariants.SystemBlock(); block != "" {
+			msgs = append([]llm.Message{{Role: "system", Content: block}}, msgs...)
+		}
+	}
+	// Персонализация: активный профиль — самый первый из «мягких» блоков
+	// (после инвариантов, приоритет над памятью).
 	if a.activeProfile != nil {
 		if block := a.activeProfile.SystemBlock(); block != "" {
 			msgs = append([]llm.Message{{Role: "system", Content: block}}, msgs...)

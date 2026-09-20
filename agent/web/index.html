@@ -38,6 +38,14 @@
     .layer-head.short { background: #4c8bf5; }
     .layer-head.work { background: #f5a623; }
     .layer-head.long { background: #7a5cd6; }
+    .layer-head.inv { background: #d64545; }
+    .inv-layer { margin-top: 1rem; }
+    .inv-form { padding: .5rem .6rem; display: flex; flex-direction: column; gap: .4rem; background: #fff; border-top: 1px solid #eef0f3; }
+    .inv-form select, .inv-form input { width: 100%; }
+    .inv-item { margin: .25rem 0; padding: .3rem .4rem; border: 1px solid #eee; border-radius: 6px; background: #fff; }
+    .inv-item .inv-title { font-weight: 600; color: #d64545; }
+    .inv-item .inv-cat { font-size: .72rem; color: #888; }
+    .inv-item .inv-del { float: right; border: none; background: none; color: #c0392b; cursor: pointer; font-size: .85rem; }
     .layer-body { padding: .45rem .6rem; font-size: .82rem; background: #fafbfc; }
     .layer-body .fact { margin: .15rem 0; white-space: pre-wrap; }
     .layer-body .fact b { color: #333; }
@@ -205,6 +213,23 @@
 
       <div class="mem-actions">
         <button id="memNewTask" type="button" class="btn-secondary">＋ Новая задача (short+working очистятся, long останется)</button>
+      </div>
+
+      <div class="layer inv-layer">
+        <div class="layer-head inv">🛡️ Инварианты (жёсткие правила)</div>
+        <p class="mem-note">Ассистент не имеет права их нарушать. При конфликте запроса — отказ с объяснением.</p>
+        <div class="layer-body" id="invList"><span class="empty">загрузка…</span></div>
+        <div class="inv-form">
+          <select id="invCategory">
+            <option value="архитектура">архитектура</option>
+            <option value="техническое решение">техническое решение</option>
+            <option value="стек">стек</option>
+            <option value="бизнес-правило">бизнес-правило</option>
+          </select>
+          <input id="invTitle" placeholder="заголовок (напр. Стек: Go)">
+          <input id="invText" placeholder="текст правила">
+          <button id="invAdd" type="button" class="btn-secondary">＋ Добавить</button>
+        </div>
       </div>
     </aside>
 
@@ -489,6 +514,76 @@
         showToast('Новая задача: short+working очищены, long сохранён', 'success');
       } catch (err) {
         showToast('не удалось начать новую задачу: ' + String(err && err.message || err), 'error');
+      }
+    });
+
+    // ---- Инварианты (жёсткие правила) ----
+    function renderInvariants(data) {
+      const list = document.getElementById('invList');
+      if (!data || !data.enabled) {
+        list.innerHTML = '<span class="empty">инварианты не настроены</span>';
+        return;
+      }
+      const items = data.invariants || [];
+      if (items.length === 0) {
+        list.innerHTML = '<span class="empty">активных правил нет</span>';
+        return;
+      }
+      list.innerHTML = items.map(i =>
+        '<div class="inv-item">' +
+          '<button class="inv-del" data-id="' + esc(i.id) + '" title="Удалить">✕</button>' +
+          '<div class="inv-title">' + esc(i.title) + '</div>' +
+          '<div class="inv-cat">[' + esc(i.category || 'без категории') + '] ' +
+            (i.severity === 'soft' ? 'мягкое' : 'жёсткое') + '</div>' +
+          '<div>' + esc(i.text) + '</div>' +
+        '</div>'
+      ).join('');
+    }
+
+    async function loadInvariants() {
+      try {
+        const resp = await fetch('/invariants');
+        if (!resp.ok) return;
+        renderInvariants(await resp.json());
+      } catch (e) { /* игнорируем */ }
+    }
+
+    document.getElementById('invAdd').addEventListener('click', async () => {
+      const category = document.getElementById('invCategory').value;
+      const title = document.getElementById('invTitle').value.trim();
+      const text = document.getElementById('invText').value.trim();
+      if (!title || !text) { showToast('Укажите заголовок и текст правила', 'warn'); return; }
+      try {
+        const resp = await fetch('/invariants', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category, title, text }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        document.getElementById('invTitle').value = '';
+        document.getElementById('invText').value = '';
+        await loadInvariants();
+        showToast('Инвариант добавлен', 'success');
+      } catch (err) {
+        showToast('не удалось добавить инвариант: ' + String(err && err.message || err), 'error');
+      }
+    });
+
+    document.getElementById('invList').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.inv-del');
+      if (!btn) return;
+      const id = btn.getAttribute('data-id');
+      try {
+        const resp = await fetch('/invariants/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        await loadInvariants();
+        showToast('Инвариант удалён', 'success');
+      } catch (err) {
+        showToast('не удалось удалить: ' + String(err && err.message || err), 'error');
       }
     });
 
@@ -786,6 +881,7 @@
     loadHistory();
     loadStrategy();
     loadMemory();
+    loadInvariants();
     refreshTask();
     route();
     applyBtn.addEventListener('click', applyStrategy);
@@ -847,6 +943,7 @@
         add('assistant', d.reply || '');
         renderStats(d.stats);
         loadMemory(); // после хода short/working могли измениться
+        loadInvariants(); // инварианты меняются редко, но держим в актуальном виде
         refreshTask(); // состояние задачи могло измениться
       });
 

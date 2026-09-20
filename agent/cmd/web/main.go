@@ -11,6 +11,7 @@ package main
 
 import (
 	"agent/feature/context"
+	"agent/feature/invariants"
 	"agent/feature/memory"
 	"agent/feature/profile"
 	"agent/feature/task"
@@ -23,6 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"agent"
 )
@@ -124,6 +126,8 @@ func main() {
 	http.HandleFunc("/profile", handleProfile)
 	http.HandleFunc("/profile/use", handleProfileUse)
 	http.HandleFunc("/profile/template", handleProfileTemplate)
+	http.HandleFunc("/invariants", handleInvariants)
+	http.HandleFunc("/invariants/delete", handleInvariantDelete)
 	http.HandleFunc("/compare", handleCompare)
 	http.HandleFunc("/compare/stream", handleCompareStream)
 	http.HandleFunc("/favicon.ico", handleFavicon)
@@ -416,6 +420,89 @@ func handleMemory(w http.ResponseWriter, r *http.Request) {
 	resp := memoryView{Short: len(hist), Working: m.Working().All(), Long: long}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// invariantsView — представление инвариантов для UI.
+type invariantsView struct {
+	Enabled    bool                   `json:"enabled"`
+	Invariants []invariants.Invariant `json:"invariants"`
+}
+
+// handleInvariants: GET — список активных инвариантов; POST — добавить правило.
+func handleInvariants(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		view := invariantsView{Enabled: ag.Invariants() != nil}
+		if ag.Invariants() != nil {
+			view.Invariants = ag.Invariants().Active()
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(view)
+	case http.MethodPost:
+		var req struct {
+			Category string `json:"category"`
+			Title    string `json:"title"`
+			Text     string `json:"text"`
+			Severity string `json:"severity"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
+			return
+		}
+		if req.Title == "" || req.Text == "" {
+			http.Error(w, "нужны title и text", http.StatusBadRequest)
+			return
+		}
+		if ag.Invariants() == nil {
+			http.Error(w, "инварианты не настроены (invariants_file пуст)", http.StatusBadRequest)
+			return
+		}
+		sev := req.Severity
+		if sev != invariants.SeverityHard && sev != invariants.SeveritySoft {
+			sev = invariants.SeverityHard
+		}
+		inv := invariants.Invariant{
+			ID:       fmt.Sprintf("inv_%d", time.Now().UnixNano()),
+			Category: req.Category,
+			Title:    req.Title,
+			Text:     req.Text,
+			Severity: sev,
+			Enabled:  true,
+		}
+		if err := ag.Invariants().Add(inv); err != nil {
+			http.Error(w, safeError(err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "id": inv.ID})
+	default:
+		http.Error(w, "ожидается GET или POST", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleInvariantDelete: POST {"id":"..."} — удалить инвариант по ID.
+func handleInvariantDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "ожидается POST", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
+		return
+	}
+	if ag.Invariants() == nil {
+		http.Error(w, "инварианты не настроены (invariants_file пуст)", http.StatusBadRequest)
+		return
+	}
+	if err := ag.Invariants().Delete(req.ID); err != nil {
+		http.Error(w, safeError(err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 type rememberReq struct {

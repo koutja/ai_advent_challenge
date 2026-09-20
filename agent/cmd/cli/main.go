@@ -19,6 +19,7 @@ import (
 	"agent"
 	"agent/feature/context"
 	"agent/feature/dialog"
+	"agent/feature/invariants"
 	"agent/feature/memory"
 	"agent/feature/profile"
 	"agent/feature/task"
@@ -33,6 +34,7 @@ func main() {
 	compareStrategies := flag.Bool("compare-strategies", false, "прогнать сценарий «собираем ТЗ» на всех 3 стратегиях контекста")
 	compareMemory := flag.Bool("compare-memory", false, "сравнить ответы агента с долговременной памятью и без неё")
 	compareProfiles := flag.Bool("compare-profiles", false, "сравнить ответы агента под разными профилями (terse vs detailed)")
+	checkInvariants := flag.Bool("check-invariants", false, "прогнать демо: запрос конфликтует с инвариантом и отказ")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -70,6 +72,10 @@ func main() {
 	}
 	if *compare {
 		runCompare(ag)
+		return
+	}
+	if *checkInvariants {
+		runCheckInvariants(ag)
 		return
 	}
 	switch *compressMode {
@@ -193,6 +199,10 @@ func main() {
 			} else {
 				fmt.Printf("[long-память: %s: %s = %s]\n", kind, key, value)
 			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/invariants"), strings.HasPrefix(line, "/invariant"):
+			handleInvariantCmd(ag, line)
 			fmt.Print("> ")
 			continue
 		case strings.HasPrefix(line, "/newtask"):
@@ -824,6 +834,97 @@ func writeCompareReport(results []agent.StrategyResult) {
 		}
 	} else {
 		fmt.Printf("предупреждение: не удалось создать plans/: %v\n", err)
+	}
+}
+
+// runCheckInvariants — демонстрация поведения при конфликте запроса и инварианта:
+// показывает, как ассистент детерминированно отказывается (без обращения к LLM)
+// и как объясняет отказ.
+func runCheckInvariants(ag *agent.Agent) {
+	mgr := ag.Invariants()
+	fmt.Println("\n=== Проверка инвариантов: конфликт запроса и правила ===")
+	if mgr == nil {
+		fmt.Println("инварианты не настроены (в config.json пустой invariants_file)")
+		fmt.Println()
+		return
+	}
+	fmt.Println("Активные инварианты:")
+	for _, i := range mgr.Active() {
+		fmt.Printf("  - [%s] %s: %s\n", invariants.CategoryLabel(i.Category), i.Title, i.Text)
+	}
+
+	conflictInput := "перепишите сервис на python"
+	fmt.Printf("\nДемо-запрос, конфликтующий с инвариантом: %q\n", conflictInput)
+	cs := mgr.CheckConflict(conflictInput)
+	hard := invariants.HardConflicts(cs)
+	if len(hard) > 0 {
+		fmt.Println("\nОтвет ассистента (детерминированный отказ, без LLM):")
+		fmt.Println(mgr.RefusalTextAll(hard))
+	} else if len(cs) > 0 {
+		fmt.Println("\nОбнаружен мягкий конфликт (предупреждение, ответ не блокируется):")
+		for _, c := range cs {
+			fmt.Printf("  - [%s] %s\n", invariants.CategoryLabel(c.Invariant.Category), c.Invariant.Title)
+		}
+	} else {
+		fmt.Println("\nКонфликт не обнаружен — запрос обрабатывается обычным путём.")
+	}
+	fmt.Println()
+}
+
+// handleInvariantCmd обрабатывает REPL-команды управления инвариантами:
+//
+//	/invariants             — список активных
+//	/invariant add <cat>|<title>|<text>   — добавить правило
+//	/invariant rm <id>      — удалить по ID
+//	/invariant show <id>    — показать подробно
+func handleInvariantCmd(ag *agent.Agent, line string) {
+	mgr := ag.Invariants()
+	if mgr == nil {
+		fmt.Println("[инварианты не настроены: в config.json пустой invariants_file]")
+		return
+	}
+	fields := strings.Fields(line)
+	switch {
+	case fields[0] == "/invariants" || (len(fields) >= 2 && fields[1] == "list"):
+		active := mgr.Active()
+		if len(active) == 0 {
+			fmt.Println("[активных инвариантов нет]")
+			return
+		}
+		fmt.Println("[активные инварианты:]")
+		for _, i := range active {
+			fmt.Printf("  %s [%s] %s: %s\n", i.ID, invariants.CategoryLabel(i.Category), i.Title, i.Text)
+		}
+	case len(fields) >= 2 && fields[1] == "add":
+		if len(fields) < 5 {
+			fmt.Println("использование: /invariant add <категория>|<заголовок>|<текст>  (категория: архитектура|техническое решение|стек|бизнес-правило)")
+			return
+		}
+		id := "inv_" + fields[2]
+		i := invariants.Invariant{
+			ID: id, Title: fields[3], Category: fields[2],
+			Text: strings.Join(fields[4:], " "), Severity: invariants.SeverityHard, Enabled: true,
+		}
+		if err := mgr.Add(i); err != nil {
+			fmt.Printf("[ошибка: %v]\n", err)
+			return
+		}
+		fmt.Printf("[инвариант добавлен: %s]\n", id)
+	case len(fields) >= 2 && fields[1] == "rm":
+		if err := mgr.Delete(fields[2]); err != nil {
+			fmt.Printf("[ошибка: %v]\n", err)
+			return
+		}
+		fmt.Printf("[инвариант удалён: %s]\n", fields[2])
+	case len(fields) >= 2 && fields[1] == "show":
+		i, _ := mgr.Get(fields[2])
+		if i == nil {
+			fmt.Printf("[инвариант %s не найден]\n", fields[2])
+			return
+		}
+		fmt.Printf("%s [%s] severity=%s enabled=%v\n  %s\n", i.ID, invariants.CategoryLabel(i.Category), i.Severity, i.Enabled, i.Text)
+	default:
+		fmt.Println("подкоманды: list | add <cat>|<title>|<text> | rm <id> | show <id>")
 	}
 }
 

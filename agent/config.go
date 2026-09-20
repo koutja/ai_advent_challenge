@@ -23,6 +23,7 @@ type Config struct {
 	ProfileFile    string `json:"profile_file"`     // путь к БД профилей пользователя (feature/profile)
 	ActiveProfile  string `json:"active_profile"`   // id активного профиля (пусто — без персонализации)
 	TaskFile       string `json:"task_file"`        // путь к БД состояния задачи (feature/task, FSM); пусто — off
+	InvariantsFile string `json:"invariants_file"`  // путь к БД инвариантов (feature/invariants); пусто — off
 	KeepLast       int    `json:"keep_last"`        // сколько последних сообщений хранить "как есть" (Этап 4)
 	SummarizeAfter int    `json:"summarize_after"`  // когда остальное уходит в summary (Этап 4)
 	Compress       bool   `json:"compress"`         // сжатие истории включено (Этап 4)
@@ -47,6 +48,7 @@ func DefaultConfig() *Config {
 		LongMemoryFile:  "agent_longterm.db",
 		ProfileFile:     "agent_profiles.db",
 		TaskFile:        "agent_task.db",
+		InvariantsFile:  "agent_invariants.db",
 		KeepLast:        10,
 		SummarizeAfter:  10,
 		Compress:        true,
