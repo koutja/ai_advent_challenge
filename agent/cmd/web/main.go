@@ -560,6 +560,8 @@ type taskView struct {
 	Paused       bool     `json:"paused"`
 	PlanApproved bool     `json:"plan_approved"`
 	Validated    bool     `json:"validated"`
+	Plan         string   `json:"plan,omitempty"`
+	PlanError    string   `json:"plan_error,omitempty"`
 	Done         bool     `json:"done"`
 	Log          []string `json:"log,omitempty"`
 }
@@ -579,6 +581,7 @@ func taskStateView() taskView {
 	v.Paused = st.Paused
 	v.PlanApproved = st.PlanApproved
 	v.Validated = st.Validated
+	v.Plan = st.Plan
 	v.Done = st.Done()
 	v.Log = st.Log
 	return v
@@ -614,6 +617,17 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		switch req.Cmd {
 		case "begin":
 			err = ag.BeginTask(req.Arg)
+			if err == nil {
+				// Авто-генерация плана реализации через LLM при старте задачи.
+				if perr := ag.GeneratePlan(); perr != nil {
+					v := taskStateView()
+					v.PlanError = perr.Error()
+					_ = json.NewEncoder(w).Encode(v)
+					return
+				}
+			}
+		case "plan":
+			err = ag.GeneratePlan()
 		case "approve":
 			err = ag.ApproveTask()
 		case "expected":

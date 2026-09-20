@@ -101,8 +101,8 @@ func main() {
 	fmt.Println("Команды: /strategy [window|facts|branch], /checkpoint <имя>, /branch <имя>, /switch <имя>,")
 	fmt.Println("         /facts, /memory, /remember <тип> <ключ> <значение>, /newtask — начать новую задачу,")
 	fmt.Println("         /reset — очистить короткий+рабочий слои, /reset-all — очистить всё, /compress, /exit.")
-	fmt.Println("Задача (FSM): /task — состояние, /begin <цель>, /expected <действие>, /step <итог>,")
-	fmt.Println("         /approve — утвердить план (до реализации), /next — следующий этап,")
+	fmt.Println("Задача (FSM): /task — состояние, /begin <цель> (авто-план через LLM), /plan — перегенерировать план,")
+	fmt.Println("         /expected <действие>, /step <итог>, /approve — утвердить план (до реализации), /next — следующий этап,")
 	fmt.Println("         /accept — принять после валидации (validation→done), /rework <причина>,")
 	fmt.Println("         /pause — пауза, /resume — продолжить.")
 
@@ -221,6 +221,10 @@ func main() {
 			continue
 		case strings.HasPrefix(line, "/approve"):
 			handleTaskCmd(ag, "approve", "")
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/plan"):
+			handleTaskCmd(ag, "plan", "")
 			fmt.Print("> ")
 			continue
 		case strings.HasPrefix(line, "/expected"):
@@ -386,6 +390,12 @@ func printTaskState(ag *agent.Agent) {
 		fmt.Printf("  ожидаемое действие: %s\n", st.Expected)
 	}
 	fmt.Printf("  план утверждён: %v | валидация пройдена: %v\n", st.PlanApproved, st.Validated)
+	if st.Plan != "" {
+		fmt.Println("  план реализации (черновик):")
+		for _, line := range strings.Split(st.Plan, "\n") {
+			fmt.Printf("    - %s\n", line)
+		}
+	}
 	if len(st.Log) > 0 {
 		fmt.Println("  итоги шагов:")
 		for _, line := range st.Log {
@@ -414,6 +424,14 @@ func handleTaskCmd(ag *agent.Agent, cmd, arg string) {
 	switch cmd {
 	case "begin":
 		err = ag.BeginTask(arg)
+		if err == nil {
+			// Авто-генерация плана реализации через LLM при старте задачи.
+			if perr := ag.GeneratePlan(); perr != nil {
+				fmt.Printf("[план не сгенерирован: %v]\n", perr)
+			}
+		}
+	case "plan":
+		err = ag.GeneratePlan()
 	case "approve":
 		err = ag.ApproveTask()
 	case "expected":

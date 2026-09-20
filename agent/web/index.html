@@ -98,6 +98,11 @@
     #toasts { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
     .toast { background: #fff; border: 1px solid #e3e6ea; border-left: 4px solid #1a73e8; border-radius: 8px; padding: .6rem .8rem; box-shadow: 0 4px 12px rgba(0,0,0,.08); font-size: .85rem; display: flex; gap: .6rem; align-items: flex-start; animation: toastIn .25s ease; }
     .toast.error { border-left-color: #e5484d; }
+    /* Оверлей «агент работает» — виден во время LLM-вызовов (план/ответ) */
+    #working { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; background: rgba(255,255,255,.55); backdrop-filter: blur(1px); }
+    #working .working-card { display: flex; flex-direction: column; align-items: center; gap: .7rem; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 1.2rem 1.6rem; box-shadow: 0 6px 20px rgba(0,0,0,.1); }
+    .spinner { width: 26px; height: 26px; border: 3px solid #d0d5dd; border-top-color: #1a73e8; border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .toast.warn { border-left-color: #f5a623; }
     .toast.success { border-left-color: #2e9e44; }
     .toast-close { cursor: pointer; color: #999; margin-left: auto; font-weight: 700; }
@@ -283,6 +288,13 @@
     </div>
   </section>
 
+  <div id="working">
+    <div class="working-card">
+      <div class="spinner"></div>
+      <span id="workingLabel">Агент работает…</span>
+    </div>
+  </div>
+
   <div id="toasts"></div>
 
   <script>
@@ -336,16 +348,30 @@
       log.scrollTop = log.scrollHeight;
     }
 
-    function showTyping() {
+    function showTyping(label) {
       if (typingEl) return;
       typingEl = document.createElement('div');
       typingEl.className = 'typing';
-      typingEl.textContent = 'Агент печатает…';
+      typingEl.textContent = label || 'Агент печатает…';
       log.appendChild(typingEl);
       log.scrollTop = log.scrollHeight;
     }
     function hideTyping() {
       if (typingEl) { typingEl.remove(); typingEl = null; }
+    }
+
+    // ---- Индикатор «агент работает» (LLM-вызов: план или ответ) ----
+    const workingEl = document.getElementById('working');
+    const workingLabel = document.getElementById('workingLabel');
+    let workingCount = 0;
+    function showWorking(label) {
+      workingCount++;
+      if (workingLabel) workingLabel.textContent = label || 'Агент работает…';
+      if (workingEl) workingEl.style.display = 'flex';
+    }
+    function hideWorking() {
+      workingCount = Math.max(0, workingCount - 1);
+      if (workingCount === 0 && workingEl) workingEl.style.display = 'none';
     }
 
     function setBar(id, val, max) {
@@ -629,6 +655,7 @@
       if (d.stage === 'planning') h += ' · <b>План:</b> ' + (d.plan_approved ? '✔ утверждён' : '⛔ не утверждён');
       if (d.stage === 'validation' || d.done) h += ' · <b>Валидация:</b> ' + (d.validated ? '✔ пройдена' : '—');
       if (d.expected) h += ' · <b>Ожидаемое действие:</b> ' + esc(d.expected);
+      // Сам план выводится в ленту чата как сообщение, а не в баннер.
       if (d.log && d.log.length) {
         h += ' <details><summary>итоги (' + d.log.length + ')</summary>' +
           d.log.map(l => '<div class="fact">' + esc(l) + '</div>').join('') + '</details>';
@@ -646,7 +673,11 @@
     }
 
     // sendTask выполняет команду FSM через /task и обновляет баннер.
+    // Для begin/plan генерация плана идёт в ЛЕНТУ ЧАТА: индикатор «Агент пишет
+    // план…» и сам план — как сообщение ассистента (история диалога).
     async function sendTask(cmd, arg) {
+      const genPlan = (cmd === 'begin' || cmd === 'plan');
+      if (genPlan) showTyping('Агент пишет план…');
       try {
         const resp = await fetch('/task', {
           method: 'POST',
@@ -654,6 +685,7 @@
           body: JSON.stringify({ cmd: cmd, arg: arg || '' }),
         });
         if (!resp.ok) {
+          if (genPlan) hideTyping();
           // Структурированный отказ на недопустимый переход (TransitionError).
           try {
             const j = await resp.json();
@@ -665,14 +697,25 @@
           showToast('ошибка задачи: ' + t, 'error');
           return;
         }
-        renderTaskStatus(await resp.json());
+        const data = await resp.json();
+        if (genPlan) hideTyping();
+        if (genPlan) {
+          if (data && data.plan) {
+            add('assistant', '📋 План реализации:\n' + data.plan);
+          } else if (data && data.plan_error) {
+            add('assistant', '[не удалось составить план] ' + data.plan_error);
+            showToast('План не сгенерирован: ' + data.plan_error, 'warn');
+          }
+        }
+        renderTaskStatus(data);
       } catch (e) {
+        if (genPlan) hideTyping();
         showToast('ошибка сети', 'error');
       }
     }
 
     // Slash-команды состояния задачи прямо из поля сообщения чата.
-    const TASK_COMMANDS = ['/begin', '/approve', '/expected', '/step', '/next', '/accept', '/rework', '/pause', '/resume', '/task'];
+    const TASK_COMMANDS = ['/begin', '/plan', '/approve', '/expected', '/step', '/next', '/accept', '/rework', '/pause', '/resume', '/task'];
     function handleTaskSlash(line) {
       for (const c of TASK_COMMANDS) {
         if (line === c || line.indexOf(c + ' ') === 0) {
@@ -937,10 +980,16 @@
       // Slash-команды состояния задачи обрабатываются локально, без вызова LLM.
       if (handleTaskSlash(text)) return;
       (async () => {
-      // Активной задачи нет — первое сообщение само её начинает (цель = текст).
-      if (!hasActiveTask()) await sendTask('begin', text);
+      // Активной задачи нет — первое сообщение само её начинает (цель = текст),
+      // и агент сразу составляет план, выводя его в чат как сообщение.
+      if (!hasActiveTask()) {
+        add('user', text);
+        await sendTask('begin', text); // покажет «Агент пишет план…» + план в чате
+        return;
+      }
       add('user', text);
       showTyping();
+      showWorking('Агент думает…');
 
       // Стрим хода: события стратегии приходят живьём, затем — ответ агента.
       const es = new EventSource('/chat/stream?message=' + encodeURIComponent(text));
@@ -952,6 +1001,7 @@
 
       es.addEventListener('reply', (ev) => {
         hideTyping();
+        hideWorking();
         es.close();
         let d = {}; try { d = JSON.parse(ev.data); } catch (err) {}
         add('assistant', d.reply || '');
@@ -963,6 +1013,7 @@
 
       es.addEventListener('chat_error', (ev) => {
         hideTyping();
+        hideWorking();
         es.close();
         let msg = 'ошибка';
         try { const j = JSON.parse(ev.data); if (j.error) msg = j.error; } catch (err) {}
@@ -971,7 +1022,7 @@
         showToast(msg, 'error');
       });
 
-      es.onerror = () => {};
+      es.onerror = () => { hideWorking(); };
       })();
     });
   </script>

@@ -64,6 +64,7 @@ type State struct {
 	Paused       bool     // признак паузы
 	PlanApproved bool     // true — план утверждён (guard для перехода в исполнение)
 	Validated    bool     // true — валидация пройдена (guard для финала)
+	Plan         string   // черновик плана реализации (генерирует LLM при старте задачи)
 	Log          []string // краткие итоги выполненных шагов (компактный контекст для resume)
 }
 
@@ -83,6 +84,8 @@ type Machine interface {
 	// следующему шагу того же этапа. Когда этап исчерпан, переход на следующий
 	// этап делается явно через NextStage.
 	Advance(summary string) error
+	// SetPlan сохраняет черновик плана реализации (генерирует LLM).
+	SetPlan(text string) error
 	// NextStage переводит на следующий этап: planning→execution→validation.
 	// Из validation к финалу идёт только через Accept (финал требует валидации).
 	NextStage() error
@@ -181,6 +184,19 @@ func (m *machine) SetExpected(action string) error {
 		return errors.New("нет активной задачи (сначала Begin)")
 	}
 	m.st.Expected = action
+	return m.persist()
+}
+
+// SetPlan сохраняет черновик плана реализации (генерирует LLM). Допустим только
+// при активной задаче; план остаётся видимым до Accept/Begin.
+func (m *machine) SetPlan(text string) error {
+	if !m.st.IsActive() {
+		return errors.New("нет активной задачи (сначала Begin)")
+	}
+	m.st.Plan = strings.TrimSpace(text)
+	if m.st.Plan != "" && m.st.Expected == "" {
+		m.st.Expected = "утвердите план (/approve), затем переходите к реализации"
+	}
 	return m.persist()
 }
 
@@ -302,6 +318,12 @@ func (m *machine) SystemBlock() string {
 		sb.WriteString(fmt.Sprintf("- Валидация пройдена: %s\n", yesNo(st.Validated)))
 	}
 	sb.WriteString("- Переходы контролируются: реализация требует утверждённого плана, финал — валидации.\n")
+	if st.Plan != "" {
+		sb.WriteString("План реализации (черновик):\n")
+		for _, line := range strings.Split(st.Plan, "\n") {
+			sb.WriteString("- " + line + "\n")
+		}
+	}
 	if st.Expected != "" {
 		sb.WriteString("- Ожидаемое действие: " + st.Expected + "\n")
 	}
