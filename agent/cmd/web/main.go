@@ -10,8 +10,12 @@
 package main
 
 import (
+	stdctx "context"
+	"sync"
+
 	"agent/feature/context"
 	"agent/feature/invariants"
+	mcpx "agent/feature/mcp"
 	"agent/feature/memory"
 	"agent/feature/profile"
 	"agent/feature/task"
@@ -32,6 +36,9 @@ import (
 var (
 	ag     *agent.Agent
 	appCfg *agent.Config
+
+	webMCP   *mcpx.Client // кэшированное MCP-соединение для web
+	webMCPMu sync.Mutex
 )
 
 type chatReq struct {
@@ -132,6 +139,8 @@ func main() {
 	http.HandleFunc("/profile/template", handleProfileTemplate)
 	http.HandleFunc("/invariants", handleInvariants)
 	http.HandleFunc("/invariants/delete", handleInvariantDelete)
+	http.HandleFunc("/mcp/tools", handleMCPTools)
+	http.HandleFunc("/mcp/call", handleMCPCall)
 	http.HandleFunc("/compare", handleCompare)
 	http.HandleFunc("/compare/stream", handleCompareStream)
 	http.HandleFunc("/favicon.ico", handleFavicon)
@@ -139,6 +148,75 @@ func main() {
 
 	fmt.Printf("Web-интерфейс агента: http://%s (стратегия: %s)\n", *addr, strategyLabel(ag))
 	log.Fatal(http.ListenAndServe(*addr, nil))
+}
+
+// mcpClient возвращает кэшированное MCP-соединение, создавая его при первом
+// обращении (запускает bin/mcp-server как дочерний процесс по stdio).
+func mcpClient() (*mcpx.Client, error) {
+	webMCPMu.Lock()
+	defer webMCPMu.Unlock()
+	if webMCP != nil {
+		return webMCP, nil
+	}
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 15*time.Second)
+	defer cancel()
+	c, err := mcpx.Connect(ctx, appCfg.MCPCommand, appCfg.MCPArgs...)
+	if err != nil {
+		return nil, err
+	}
+	webMCP = c
+	return c, nil
+}
+
+// handleMCPTools возвращает список доступных MCP-инструментов.
+func handleMCPTools(w http.ResponseWriter, r *http.Request) {
+	c, err := mcpClient()
+	if err != nil {
+		http.Error(w, "MCP: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	ctx, cancel := stdctx.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	tools, err := c.ListTools(ctx)
+	if err != nil {
+		http.Error(w, "MCP tools/list: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tools": tools})
+}
+
+type mcpCallReq struct {
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
+}
+
+// handleMCPCall вызывает MCP-инструмент и возвращает его результат.
+func handleMCPCall(w http.ResponseWriter, r *http.Request) {
+	var req mcpCallReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	c, err := mcpClient()
+	if err != nil {
+		http.Error(w, "MCP: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	ctx, cancel := stdctx.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	out, err := c.CallTool(ctx, req.Name, req.Arguments)
+	if err != nil {
+		http.Error(w, "MCP call: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"result": out})
+}
+
+// writeJSON пишет ответ в формате JSON.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // handleFavicon отдаёт заглушку favicon (favicon.svg), чтобы браузеры и агенты

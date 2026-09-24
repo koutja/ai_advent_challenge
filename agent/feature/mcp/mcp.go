@@ -2,7 +2,9 @@ package mcpx
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -50,6 +52,41 @@ func (c *Client) ListTools(ctx context.Context) ([]ToolInfo, error) {
 		infos = append(infos, ToolInfo{Name: t.Name, Description: t.Description})
 	}
 	return infos, nil
+}
+
+// CallTool вызывает инструмент с указанным именем на подключённом сервере и
+// возвращает его результат как текст. Аргументы передаются как map (JSON).
+// Если инструмент завершился ошибкой (IsError), возвращается ошибка с текстом
+// результата.
+func (c *Client) CallTool(ctx context.Context, name string, arguments map[string]any) (string, error) {
+	params := &mcp.CallToolParams{Name: name, Arguments: arguments}
+	res, err := c.session.CallTool(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("вызов инструмента %q: %w", name, err)
+	}
+
+	text := extractText(res)
+	if res.IsError {
+		if text == "" {
+			text = "<пустой результат ошибки>"
+		}
+		return "", fmt.Errorf("инструмент %q вернул ошибку: %s", name, text)
+	}
+	return text, nil
+}
+
+// extractText собирает все текстовые блоки результата в одну строку.
+func extractText(res *mcp.CallToolResult) string {
+	var sb strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(tc.Text)
+		}
+	}
+	return sb.String()
 }
 
 // Close завершает соединение и дожидается выхода серверного процесса.

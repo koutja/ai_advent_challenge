@@ -11,6 +11,7 @@ import (
 
 	"aichallenge/llm"
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -39,6 +40,8 @@ func main() {
 	compareProfiles := flag.Bool("compare-profiles", false, "сравнить ответы агента под разными профилями (terse vs detailed)")
 	checkInvariants := flag.Bool("check-invariants", false, "прогнать демо: запрос конфликтует с инвариантом и отказ")
 	mcpTools := flag.Bool("mcp-tools", false, "подключиться к MCP-серверу (bin/mcp-server) и вывести список инструментов")
+	mcpCall := flag.String("mcp-call", "", "вызвать MCP-инструмент по имени (например get_task)")
+	mcpArgs := flag.String("mcp-args", "", "JSON-аргументы инструмента для --mcp-call (опционально)")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -48,6 +51,10 @@ func main() {
 
 	if *mcpTools {
 		runMCPTools(cfg)
+		return
+	}
+	if *mcpCall != "" {
+		runMCPCall(cfg, *mcpCall, *mcpArgs)
 		return
 	}
 
@@ -138,6 +145,57 @@ func main() {
 			} else {
 				fmt.Printf("[стратегия: %s]\n", parts[1])
 			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/mcp-tools"):
+			c, err := replConnect(cfg)
+			if err != nil {
+				fmt.Println("ошибка:", err)
+				fmt.Print("> ")
+				continue
+			}
+			tools, err := c.ListTools(stdctx.Background())
+			if err != nil {
+				fmt.Println("ошибка:", err)
+				fmt.Print("> ")
+				continue
+			}
+			for _, t := range tools {
+				fmt.Printf("  • %-12s %s\n", t.Name, t.Description)
+			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/mcp-call"):
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "/mcp-call"))
+			parts := strings.SplitN(rest, " ", 2)
+			if len(parts) < 1 || parts[0] == "" {
+				fmt.Println(`использование: /mcp-call <имя> <json-args>`)
+				fmt.Println(`  например: /mcp-call create_task {"title":"Написать отчёт","priority":"high"}`)
+				fmt.Print("> ")
+				continue
+			}
+			name := parts[0]
+			var args map[string]any
+			if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+				if err := json.Unmarshal([]byte(parts[1]), &args); err != nil {
+					fmt.Println("ошибка разбора JSON-аргументов:", err)
+					fmt.Print("> ")
+					continue
+				}
+			}
+			c, err := replConnect(cfg)
+			if err != nil {
+				fmt.Println("ошибка:", err)
+				fmt.Print("> ")
+				continue
+			}
+			out, err := c.CallTool(stdctx.Background(), name, args)
+			if err != nil {
+				fmt.Println("ошибка:", err)
+				fmt.Print("> ")
+				continue
+			}
+			fmt.Println(out)
 			fmt.Print("> ")
 			continue
 		case strings.HasPrefix(line, "/checkpoint"):
@@ -1002,6 +1060,51 @@ func handleInvariantCmd(ag *agent.Agent, line string) {
 	default:
 		fmt.Println("подкоманды: list | add <cat>|<title>|<text> | rm <id> | show <id>")
 	}
+}
+
+// replMCP — кэшированное MCP-соединение для REPL-сессии (создаётся лениво).
+var replMCP *mcpx.Client
+
+// replConnect возвращает MCP-клиента для REPL, создавая соединение при первом
+// обращении (replMCP). REPL однопоточный, поэтому гонки нет.
+func replConnect(cfg *agent.Config) (*mcpx.Client, error) {
+	if replMCP != nil {
+		return replMCP, nil
+	}
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 15*time.Second)
+	defer cancel()
+	c, err := mcpx.Connect(ctx, cfg.MCPCommand, cfg.MCPArgs...)
+	if err != nil {
+		return nil, err
+	}
+	replMCP = c
+	return c, nil
+}
+
+// runMCPCall подключается к MCP-серверу, вызывает инструмент по имени и печатает
+// результат. Аргументы передаются как JSON-строка (--mcp-args).
+func runMCPCall(cfg *agent.Config, name, argsJSON string) {
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 15*time.Second)
+	defer cancel()
+
+	c, err := mcpx.Connect(ctx, cfg.MCPCommand, cfg.MCPArgs...)
+	if err != nil {
+		die(fmt.Errorf("MCP-соединение: %w", err))
+	}
+	defer c.Close()
+
+	var args map[string]any
+	if strings.TrimSpace(argsJSON) != "" {
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			die(fmt.Errorf("разбор --mcp-args: %w", err))
+		}
+	}
+
+	out, err := c.CallTool(ctx, name, args)
+	if err != nil {
+		die(err)
+	}
+	fmt.Println(out)
 }
 
 // runMCPTools подключается к локальному MCP-серверу (отдельный процесс

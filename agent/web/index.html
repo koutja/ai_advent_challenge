@@ -1062,12 +1062,71 @@
       } catch (err) { /* игнорируем */ }
     }
 
+    // Slash-команды MCP: /mcp-tools и /mcp-call <имя> <json>. Обрабатываются
+    // локально (без вызова LLM), как остальные служебные команды.
+    async function handleMCPSlash(text) {
+      const t = text.trim();
+      if (t === '/mcp-tools') {
+        add('user', t);
+        showTyping();
+        try {
+          const resp = await fetch('/mcp/tools');
+          if (!resp.ok) throw new Error(await resp.text());
+          const d = await resp.json();
+          hideTyping();
+          let s = 'Доступные MCP-инструменты:\n';
+          for (const tool of d.tools) s += '  • ' + tool.name + ' — ' + tool.description + '\n';
+          add('assistant', s);
+        } catch (err) {
+          hideTyping();
+          add('assistant', '[ошибка] ' + err.message);
+          showToast(err.message, 'error');
+        }
+        return true;
+      }
+      if (t.startsWith('/mcp-call')) {
+        add('user', t);
+        const rest = t.slice('/mcp-call'.length).trim();
+        const sp = rest.indexOf(' ');
+        const name = sp < 0 ? rest : rest.slice(0, sp);
+        const argsStr = sp < 0 ? '' : rest.slice(sp + 1).trim();
+        if (!name) {
+          add('assistant', 'использование: /mcp-call <имя> <json-args>\n  например: /mcp-call create_task {"title":"Написать отчёт","priority":"high"}');
+          return true;
+        }
+        let args = {};
+        if (argsStr) {
+          try { args = JSON.parse(argsStr); }
+          catch (e) { add('assistant', '[ошибка] неверный JSON-аргумент: ' + e.message); return true; }
+        }
+        showTyping();
+        try {
+          const resp = await fetch('/mcp/call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, arguments: args }),
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+          const d = await resp.json();
+          hideTyping();
+          add('assistant', d.result || '(пустой результат)');
+        } catch (err) {
+          hideTyping();
+          add('assistant', '[ошибка] ' + err.message);
+          showToast(err.message, 'error');
+        }
+        return true;
+      }
+      return false;
+    }
+
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const text = input.value.trim();
       if (!text) return;
       input.value = '';
       // Slash-команды состояния задачи обрабатываются локально, без вызова LLM.
+      if (handleMCPSlash(text)) return;
       if (handleTaskSlash(text)) return;
       (async () => {
       // Активной задачи нет — первое сообщение само её начинает (цель = текст),

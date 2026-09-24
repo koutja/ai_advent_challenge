@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -33,6 +33,13 @@ run-check-invariants:
 # соединение и печатает tools/list. Проверка: соединение + список инструментов.
 run-mcp-tools:
 	go run ./cmd/cli --mcp-tools
+
+# ===== MCP: вызвать инструмент и напечатать результат =====
+# Примеры:
+#   make run-mcp-call TOOL=get_task  ARGS='{"task_id":"T-001"}'
+#   make run-mcp-call TOOL=create_task ARGS='{"title":"Отчёт","priority":"high"}'
+run-mcp-call:
+	go run ./cmd/cli --mcp-call $(TOOL) --mcp-args '$(ARGS)'
 
 # ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
 build-mcp-server:
