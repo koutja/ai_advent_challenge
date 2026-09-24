@@ -14,10 +14,12 @@ agent/
 │   ├── dialog/       # short-term: история текущего диалога (Memory, InMemory, SQLiteMemory)
 │   ├── context/      # стратегии контекста (SlidingWindow / FactsMemory / Branching / ContextManager)
 │   ├── memory/       # многослойная память: WorkingStore, LongStore, LayeredMemory, роутинг, extract
-│   └── profile/      # персонализация: UserProfile, ProfileStore (SQLite), SystemBlock()
+│   ├── profile/      # персонализация: UserProfile, ProfileStore (SQLite), SystemBlock()
+│   └── mcp/          # MCP: stdio-клиент (Connect/ListTools) + сервер демо-инструментов (go-sdk)
 ├── cmd/
-│   ├── cli/main.go   # консольный чат (REPL) + сравнения
-│   └── web/main.go   # web-чат (HTTP-сервер) — обязательный этап после CLI
+│   ├── cli/main.go       # консольный чат (REPL) + сравнения
+│   ├── web/main.go       # web-чат (HTTP-сервер) — обязательный этап после CLI
+│   └── mcp-server/main.go # автономный MCP-сервер (отдельный процесс, stdio)
 └── web/index.html    # страница web-чата
 ```
 
@@ -38,13 +40,49 @@ go run ./cmd/cli --compare-strategies # прогон сценария «соби
 go run ./cmd/cli --compare-memory    # влияние долговременной памяти на ответы (long vs без)
 go run ./cmd/cli --compare-profiles  # влияние персонализации (профили terse vs detailed)
 go run ./cmd/cli --check-invariants  # демо: конфликт запроса с инвариантом → отказ
+go run ./cmd/cli --mcp-tools         # MCP: подключиться к серверу и вывести список инструментов
+go run ./cmd/mcp-server              # MCP: запустить сервер как отдельный процесс (stdio)
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
 go run ./cmd/web --strategy branch   # web-чат со стратегией по умолчанию (window|facts|branch)
 make stop-web                        # остановить ранее запущенный go run ./cmd/web (по порту 8080)
-make build                           # собрать bin/agent_cli и bin/agent_web
+make build                           # собрать bin/agent_cli, bin/agent_web и bin/mcp-server
+make build-mcp-server                # собрать только bin/mcp-server
 make test                            # прогнать тесты
 make reset-history                   # удалить agent_history.db (сброс истории)
 ```
+
+## MCP (Model Context Protocol)
+
+Подключение MCP реализовано на официальном Go SDK
+[`github.com/modelcontextprotocol/go-sdk`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk).
+Расклад «сервер отдельным процессом, клиент подключается по stdio» близок к
+реальному деплою: [`cmd/mcp-server`](cmd/mcp-server) — автономный сервер
+демо-инструментов, а [`feature/mcp`](feature/mcp) — stdio-клиент, который
+запускает его как дочерний процесс.
+
+Сервер объявляет инструменты: `get_time` (текущее время) и `echo`
+(возвращает сообщение).
+
+```bash
+make build-mcp-server     # собрать bin/mcp-server
+make run-mcp-tools        # поднять сервер-процесс, установить соединение,
+                          # напечатать tools/list
+```
+
+Пример вывода `make run-mcp-tools`:
+
+```
+MCP-соединение установлено (сервер: bin/mcp-server). Инструментов: 2
+  • get_time    Возвращает текущее время сервера в формате RFC3339.
+  • echo        Возвращает переданное сообщение без изменений.
+```
+
+Команда запуска сервера задаётся полем `mcp_command` в `config.json`
+(по умолчанию `bin/mcp-server`; необязательные аргументы — `mcp_args`).
+Проверка автоматизирована в [`feature/mcp/mcp_test.go`](feature/mcp/mcp_test.go):
+тестовый бинарник запускается как сервер-помощник, клиент подключается и
+сверяет список инструментов — это покрывает оба требования «соединение
+устанавливается» и «список инструментов корректно возвращается».
 
 Веб-интерфейс ([`web/index.html`](web/index.html)) показывает селектор стратегии
 (`window | facts | branch`, переключение через `POST /strategy`). Прямо в ленте

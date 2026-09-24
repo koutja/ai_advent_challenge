@@ -11,5 +11,6 @@
   "window_size": 4,
   "facts_keep_last": 6,
   "facts_key_max": 50,
-  "facts_extractor": "heuristic"
+  "facts_extractor": "heuristic",
+  "mcp_command": "bin/mcp-server"
 }

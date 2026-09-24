@@ -16,5 +16,6 @@
   "window_size": 10,
   "facts_keep_last": 10,
   "facts_key_max": 50,
-  "facts_extractor": "llm"
+  "facts_extractor": "llm",
+  "mcp_command": "bin/mcp-server"
 }

@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-web stop-web build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -28,6 +28,17 @@ run-compare-profiles:
 run-check-invariants:
 	go run ./cmd/cli --check-invariants
 
+# ===== MCP: подключиться к серверу и вывести список инструментов =====
+# Запускает cmd/mcp-server как отдельный процесс (stdio), устанавливает
+# соединение и печатает tools/list. Проверка: соединение + список инструментов.
+run-mcp-tools:
+	go run ./cmd/cli --mcp-tools
+
+# ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
+build-mcp-server:
+	mkdir -p bin
+	go build -o bin/mcp-server ./cmd/mcp-server
+
 # ===== Веб-интерфейс (опционально) =====
 run-web:
 	go run ./cmd/web
@@ -44,11 +55,12 @@ stop-web:
 		echo "web на порту $(WEB_PORT) не запущен"; \
 	fi
 
-# ===== Сборка обоих бинарников в agent/bin/ =====
+# ===== Сборка бинарников в agent/bin/ =====
 build:
 	mkdir -p bin
 	go build -o bin/agent_cli ./cmd/cli
 	go build -o bin/agent_web ./cmd/web
+	go build -o bin/mcp-server ./cmd/mcp-server
 
 # ===== Тесты =====
 test:

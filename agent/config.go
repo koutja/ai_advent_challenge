@@ -39,6 +39,12 @@ type Config struct {
 	FactsKeepLast   int    `json:"facts_keep_last"` // Facts: сколько последних сообщений слать с фактами
 	FactsKeyMax     int    `json:"facts_key_max"`   // Facts: лимит ключей фактов
 	FactsExtractor  string `json:"facts_extractor"` // Facts: "llm" | "heuristic"
+
+	// --- MCP (feature/mcp): локальный MCP-сервер отдельным процессом ---
+	// MCPCommand — команда запуска stdio MCP-сервера (по умолчанию bin/mcp-server).
+	MCPCommand string `json:"mcp_command"`
+	// MCPArgs — необязательные аргументы команды MCP-сервера.
+	MCPArgs []string `json:"mcp_args,omitempty"`
 }
 
 // DefaultConfig возвращает конфиг со значениями по умолчанию.
@@ -60,6 +66,7 @@ func DefaultConfig() *Config {
 		FactsKeepLast:   10,
 		FactsKeyMax:     50,
 		FactsExtractor:  memory.ExtractorLLM, // по умолчанию точный LLM-режим извлечения
+		MCPCommand:      "bin/mcp-server",
 	}
 }
 

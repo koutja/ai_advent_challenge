@@ -7,6 +7,8 @@
 package main
 
 import (
+	stdctx "context"
+
 	"aichallenge/llm"
 	"bufio"
 	"flag"
@@ -20,6 +22,7 @@ import (
 	"agent/feature/context"
 	"agent/feature/dialog"
 	"agent/feature/invariants"
+	mcpx "agent/feature/mcp"
 	"agent/feature/memory"
 	"agent/feature/profile"
 	"agent/feature/task"
@@ -35,11 +38,17 @@ func main() {
 	compareMemory := flag.Bool("compare-memory", false, "сравнить ответы агента с долговременной памятью и без неё")
 	compareProfiles := flag.Bool("compare-profiles", false, "сравнить ответы агента под разными профилями (terse vs detailed)")
 	checkInvariants := flag.Bool("check-invariants", false, "прогнать демо: запрос конфликтует с инвариантом и отказ")
+	mcpTools := flag.Bool("mcp-tools", false, "подключиться к MCP-серверу (bin/mcp-server) и вывести список инструментов")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
 	if err != nil {
 		die(err)
+	}
+
+	if *mcpTools {
+		runMCPTools(cfg)
+		return
 	}
 
 	// Многослойная память: short- и long-слои в SQLite (переживают перезапуск),
@@ -992,6 +1001,31 @@ func handleInvariantCmd(ag *agent.Agent, line string) {
 		fmt.Printf("%s [%s] severity=%s enabled=%v\n  %s\n", i.ID, invariants.CategoryLabel(i.Category), i.Severity, i.Enabled, i.Text)
 	default:
 		fmt.Println("подкоманды: list | add <cat>|<title>|<text> | rm <id> | show <id>")
+	}
+}
+
+// runMCPTools подключается к локальному MCP-серверу (отдельный процесс
+// bin/mcp-server) по stdio, устанавливает соединение (Initialize) и печатает
+// список доступных инструментов (tools/list). Это проверка того, что
+// соединение устанавливается и список инструментов корректно возвращается.
+func runMCPTools(cfg *agent.Config) {
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 15*time.Second)
+	defer cancel()
+
+	c, err := mcpx.Connect(ctx, cfg.MCPCommand, cfg.MCPArgs...)
+	if err != nil {
+		die(fmt.Errorf("MCP-соединение: %w", err))
+	}
+	defer c.Close()
+
+	tools, err := c.ListTools(ctx)
+	if err != nil {
+		die(fmt.Errorf("MCP tools/list: %w", err))
+	}
+
+	fmt.Printf("MCP-соединение установлено (сервер: %s). Инструментов: %d\n", cfg.MCPCommand, len(tools))
+	for _, t := range tools {
+		fmt.Printf("  • %-12s %s\n", t.Name, t.Description)
 	}
 }
 
