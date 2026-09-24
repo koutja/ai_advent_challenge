@@ -10,6 +10,17 @@ import (
 	"agent/feature/task"
 )
 
+// mustUnroutableClient создаёт LLM-клиент на недоступный адрес: любой реальный
+// вызов вернёт сетевую ошибку, а не текст. Используется для проверки устойчивости.
+func mustUnroutableClient(t *testing.T) *llm.Client {
+	t.Helper()
+	c, err := llm.NewWithConfig("http://127.0.0.1:1", "k", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
 // TestGeneratePlanNoActiveTask — генерация плана без активной задачи отклоняется.
 func TestGeneratePlanNoActiveTask(t *testing.T) {
 	a := newAgentWithTask(t)

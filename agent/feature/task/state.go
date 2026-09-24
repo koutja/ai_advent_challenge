@@ -65,6 +65,7 @@ type State struct {
 	PlanApproved bool     // true — план утверждён (guard для перехода в исполнение)
 	Validated    bool     // true — валидация пройдена (guard для финала)
 	Plan         string   // черновик плана реализации (генерирует LLM при старте задачи)
+	Work         string   // накопленные результаты исполнения шагов (материал для валидации/сводки)
 	Log          []string // краткие итоги выполненных шагов (компактный контекст для resume)
 }
 
@@ -86,6 +87,8 @@ type Machine interface {
 	Advance(summary string) error
 	// SetPlan сохраняет черновик плана реализации (генерирует LLM).
 	SetPlan(text string) error
+	// AppendWork дописывает результат выполненного шага в накопленную работу.
+	AppendWork(text string) error
 	// NextStage переводит на следующий этап: planning→execution→validation.
 	// Из validation к финалу идёт только через Accept (финал требует валидации).
 	NextStage() error
@@ -197,6 +200,23 @@ func (m *machine) SetPlan(text string) error {
 	if m.st.Plan != "" && m.st.Expected == "" {
 		m.st.Expected = "утвердите план (/approve), затем переходите к реализации"
 	}
+	return m.persist()
+}
+
+// AppendWork дописывает результат выполненного шага в накопленную работу задачи
+// (материал для последующей валидации и финальной сводки).
+func (m *machine) AppendWork(text string) error {
+	if !m.st.IsActive() {
+		return errors.New("нет активной задачи (сначала Begin)")
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if m.st.Work != "" {
+		m.st.Work += "\n"
+	}
+	m.st.Work += text
 	return m.persist()
 }
 
@@ -324,6 +344,9 @@ func (m *machine) SystemBlock() string {
 			sb.WriteString("- " + line + "\n")
 		}
 	}
+	if st.Work != "" {
+		sb.WriteString(fmt.Sprintf("- Результат исполнения: %d строк сохранено (материал для валидации)\n", len(strings.Split(st.Work, "\n"))))
+	}
 	if st.Expected != "" {
 		sb.WriteString("- Ожидаемое действие: " + st.Expected + "\n")
 	}
@@ -342,4 +365,16 @@ func yesNo(b bool) string {
 		return "да"
 	}
 	return "нет"
+}
+
+// PlanSteps разбивает план на непустые строки-шаги. Используется при исполнении
+// плана (агент выполняет шаги по очереди) и в UI.
+func PlanSteps(plan string) []string {
+	var out []string
+	for _, l := range strings.Split(plan, "\n") {
+		if t := strings.TrimSpace(l); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

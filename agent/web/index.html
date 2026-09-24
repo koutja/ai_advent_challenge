@@ -708,10 +708,100 @@
           }
         }
         renderTaskStatus(data);
+        if (cmd === 'next' && data) {
+          // Переход на «исполнение» → выполнение шагов плана в чате.
+          if (data.stage === 'execution' && data.plan) startExecutionStream();
+          // Переход на «валидацию» → проверка результата через LLM в чате.
+          if (data.stage === 'validation') startValidationStream();
+        }
+        // Финализация (accept) → итоговая сводка в чате.
+        if (cmd === 'accept' && data && data.done) startFinalizeStream();
       } catch (e) {
         if (genPlan) hideTyping();
         showToast('ошибка сети', 'error');
       }
+    }
+
+    // startValidationStream запускает проверку результата через /chat/validate:
+    // вердикт (OK/REWORK) и оценка появляются в чате как сообщение ассистента.
+    function startValidationStream() {
+      showTyping('Агент проверяет результат…');
+      const es = new EventSource('/chat/validate');
+      es.addEventListener('verdict', (ev) => {
+        hideTyping(); es.close();
+        let d = {}; try { d = JSON.parse(ev.data); } catch (e) { return; }
+        const v = d.verdict === 'ok';
+        add('assistant', (v ? '✅ Валидация пройдена (OK):\n' : '⚠️ Нужна доработка (REWORK):\n') + (d.review || ''));
+        refreshTask();
+      });
+      es.addEventListener('chat_error', (ev) => {
+        hideTyping(); es.close();
+        let msg = 'ошибка'; try { const j = JSON.parse(ev.data); if (j.error) msg = j.error; } catch (e) {}
+        add('assistant', '[не удалось проверить] ' + msg);
+      });
+      es.onerror = () => { hideTyping(); };
+    }
+
+    // startReworkStream запускает доработку через /chat/rework: указания по
+    // исправлению и возврат на этап исполнения показываются в чате.
+    function startReworkStream(reason) {
+      showTyping('Агент готовит доработку…');
+      const es = new EventSource('/chat/rework?reason=' + encodeURIComponent(reason || ''));
+      es.addEventListener('rework', () => {
+        hideTyping(); es.close();
+        add('assistant', '↩ Возвращено на доработку. Выполните шаги заново (→ Этап).');
+        refreshTask();
+      });
+      es.addEventListener('chat_error', (ev) => {
+        hideTyping(); es.close();
+        let msg = 'ошибка'; try { const j = JSON.parse(ev.data); if (j.error) msg = j.error; } catch (e) {}
+        add('assistant', '[не удалось выполнить доработку] ' + msg);
+        showToast(msg, 'error');
+      });
+      es.onerror = () => { hideTyping(); };
+    }
+
+    // startFinalizeStream собирает финальную сводку через /chat/finalize.
+    function startFinalizeStream() {
+      showTyping('Агент собирает итоговую сводку…');
+      const es = new EventSource('/chat/finalize');
+      es.addEventListener('summary', (ev) => {
+        hideTyping(); es.close();
+        let d = {}; try { d = JSON.parse(ev.data); } catch (e) { return; }
+        add('assistant', '📄 Итоговая сводка:\n' + (d.summary || ''));
+        refreshTask();
+      });
+      es.addEventListener('chat_error', (ev) => {
+        hideTyping(); es.close();
+        let msg = 'ошибка'; try { const j = JSON.parse(ev.data); if (j.error) msg = j.error; } catch (e) {}
+        add('assistant', '[не удалось собрать сводку] ' + msg);
+      });
+      es.onerror = () => { hideTyping(); };
+    }
+
+    // startExecutionStream запускает исполнение плана через /chat/execute (SSE):
+    // каждый шаг плана появляется в ленте чата как сообщение ассистента.
+    function startExecutionStream() {
+      showTyping('Агент выполняет план…');
+      const es = new EventSource('/chat/execute');
+      es.addEventListener('step', (ev) => {
+        hideTyping();
+        let d = {}; try { d = JSON.parse(ev.data); } catch (e) { return; }
+        add('assistant', 'Шаг ' + d.step + '/' + d.total + ': ' + (d.text || ''));
+        showTyping('Агент выполняет следующий шаг…');
+      });
+      es.addEventListener('chat_error', (ev) => {
+        hideTyping(); es.close();
+        let msg = 'ошибка';
+        try { const j = JSON.parse(ev.data); if (j.error) msg = j.error; } catch (e) {}
+        add('assistant', '[ошибка выполнения плана] ' + msg);
+        showToast(msg, 'error');
+      });
+      es.addEventListener('done', () => {
+        hideTyping(); es.close();
+        refreshTask(); loadMemory();
+      });
+      es.onerror = () => { hideTyping(); };
     }
 
     // Slash-команды состояния задачи прямо из поля сообщения чата.
@@ -775,9 +865,9 @@
     btn.next.addEventListener('click', () => sendTask('next'));
     btn.accept.addEventListener('click', () => sendTask('accept'));
     btn.rework.addEventListener('click', () => {
-      const r = prompt('Причина возврата в доработку:', '');
+      const r = prompt('Причина возврата в доработку (можно пусто):', '');
       if (r === null) return;
-      sendTask('rework', r);
+      startReworkStream(r); // LLM-доработка: указания + возврат на исполнение
     });
     btn.pause.addEventListener('click', () => sendTask('pause'));
     btn.resume.addEventListener('click', () => sendTask('resume'));

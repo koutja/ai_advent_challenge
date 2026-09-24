@@ -103,6 +103,7 @@ func main() {
 	fmt.Println("         /reset — очистить короткий+рабочий слои, /reset-all — очистить всё, /compress, /exit.")
 	fmt.Println("Задача (FSM): /task — состояние, /begin <цель> (авто-план через LLM), /plan — перегенерировать план,")
 	fmt.Println("         /expected <действие>, /step <итог>, /approve — утвердить план (до реализации), /next — следующий этап,")
+	fmt.Println("         /run — выполнить текущий шаг плана через LLM, /validate — проверить результат,")
 	fmt.Println("         /accept — принять после валидации (validation→done), /rework <причина>,")
 	fmt.Println("         /pause — пауза, /resume — продолжить.")
 
@@ -225,6 +226,18 @@ func main() {
 			continue
 		case strings.HasPrefix(line, "/plan"):
 			handleTaskCmd(ag, "plan", "")
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/run"):
+			handleTaskCmd(ag, "run", "")
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/validate"):
+			handleTaskCmd(ag, "validate", "")
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/finalize"):
+			handleTaskCmd(ag, "finalize", "")
 			fmt.Print("> ")
 			continue
 		case strings.HasPrefix(line, "/expected"):
@@ -432,6 +445,28 @@ func handleTaskCmd(ag *agent.Agent, cmd, arg string) {
 		}
 	case "plan":
 		err = ag.GeneratePlan()
+	case "run":
+		var text string
+		text, err = ag.ExecuteCurrentStep()
+		if err == nil {
+			fmt.Println(text)
+			return
+		}
+	case "validate":
+		var verdict agent.Verdict
+		var review string
+		verdict, review, err = ag.ValidateWork()
+		if err == nil {
+			fmt.Printf("[вердикт] %s\n%s\n", verdict, review)
+			return
+		}
+	case "finalize":
+		var summary string
+		summary, err = ag.SummarizeDone()
+		if err == nil {
+			fmt.Println(summary)
+			return
+		}
 	case "approve":
 		err = ag.ApproveTask()
 	case "expected":

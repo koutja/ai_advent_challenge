@@ -116,6 +116,10 @@ func main() {
 
 	http.HandleFunc("/chat", handleChat)
 	http.HandleFunc("/chat/stream", handleChatStream)
+	http.HandleFunc("/chat/execute", handleChatExecute)
+	http.HandleFunc("/chat/validate", handleChatValidate)
+	http.HandleFunc("/chat/rework", handleChatRework)
+	http.HandleFunc("/chat/finalize", handleChatFinalize)
 	http.HandleFunc("/history", handleHistory)
 	http.HandleFunc("/reset", handleReset)
 	http.HandleFunc("/strategy", handleStrategy)
@@ -273,6 +277,165 @@ func handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	b, _ := json.Marshal(resp)
 	send("reply", string(b))
+}
+
+// handleChatExecute: GET /chat/execute — стримит исполнение плана задачи через
+// SSE. Пока задача на этапе execution и есть шаги, по очереди выполняет каждый
+// шаг плана через LLM (ExecuteCurrentStep) и шлёт событие "step" {step,total,text};
+// в конце — событие "done". Каждый шаг появляется в чате как сообщение.
+func handleChatExecute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "ожидается GET", http.StatusMethodNotAllowed)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "стриминг не поддерживается", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	send := func(ev, data string) {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev, data)
+		flusher.Flush()
+	}
+
+	ag.SetOnEvent(func(se context.StrategyEvent) {
+		b, _ := json.Marshal(se)
+		send("strategy", string(b))
+	})
+	defer ag.SetOnEvent(nil)
+
+	st := ag.TaskState()
+	if !st.IsActive() || st.Stage != task.StageExecution {
+		eb, _ := json.Marshal(map[string]string{"error": "нет активной задачи на этапе исполнения"})
+		send("chat_error", string(eb))
+		return
+	}
+	total := len(task.PlanSteps(st.Plan))
+
+	// Выполняем шаги по очереди, пока задача активна на этапе execution.
+	for {
+		cur := ag.TaskState()
+		if !cur.IsActive() || cur.Stage != task.StageExecution || cur.Paused {
+			break
+		}
+		if cur.Step > total {
+			break // все шаги плана выполнены
+		}
+		stepNo := cur.Step
+		text, err := ag.ExecuteCurrentStep()
+		if err != nil {
+			eb, _ := json.Marshal(map[string]string{"error": safeError(err)})
+			send("chat_error", string(eb))
+			break
+		}
+		b, _ := json.Marshal(map[string]interface{}{"step": stepNo, "total": total, "text": text})
+		send("step", string(b))
+	}
+	send("done", "{}")
+}
+
+// sseSendHeaders настраивает общие SSE-заголовки.
+func sseSendHeaders(w http.ResponseWriter) (http.Flusher, bool) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	f, ok := w.(http.Flusher)
+	return f, ok
+}
+
+// handleChatValidate: GET /chat/validate — запускает валидацию результата через
+// LLM и шлёт событие "verdict" {verdict, review}. Авто-вызывается при входе на
+// этап валидации; также доступно вручную (/validate).
+func handleChatValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "ожидается GET", http.StatusMethodNotAllowed)
+		return
+	}
+	flusher, ok := sseSendHeaders(w)
+	if !ok {
+		http.Error(w, "стриминг не поддерживается", http.StatusInternalServerError)
+		return
+	}
+	send := func(ev, data string) {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev, data)
+		flusher.Flush()
+	}
+	ag.SetOnEvent(func(se context.StrategyEvent) {
+		b, _ := json.Marshal(se)
+		send("strategy", string(b))
+	})
+	defer ag.SetOnEvent(nil)
+
+	verdict, review, err := ag.ValidateWork()
+	if err != nil {
+		eb, _ := json.Marshal(map[string]string{"error": safeError(err)})
+		send("chat_error", string(eb))
+		return
+	}
+	b, _ := json.Marshal(map[string]string{"verdict": string(verdict), "review": review})
+	send("verdict", string(b))
+}
+
+// handleChatRework: GET /chat/rework?reason=... — запускает доработку через LLM,
+// результат (указания по исправлению) шлёт событием "rework".
+func handleChatRework(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "ожидается GET", http.StatusMethodNotAllowed)
+		return
+	}
+	flusher, ok := sseSendHeaders(w)
+	if !ok {
+		http.Error(w, "стриминг не поддерживается", http.StatusInternalServerError)
+		return
+	}
+	send := func(ev, data string) {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev, data)
+		flusher.Flush()
+	}
+	reason := strings.TrimSpace(r.URL.Query().Get("reason"))
+	err := ag.ReworkWithLLM(reason)
+	if err != nil {
+		eb, _ := json.Marshal(map[string]string{"error": safeError(err)})
+		send("chat_error", string(eb))
+		return
+	}
+	send("rework", "{\"status\":\"ok\"}")
+}
+
+// handleChatFinalize: GET /chat/finalize — собирает финальную сводку по задаче
+// через LLM и шлёт её событием "summary". Авто-вызывается после accept (done).
+func handleChatFinalize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "ожидается GET", http.StatusMethodNotAllowed)
+		return
+	}
+	flusher, ok := sseSendHeaders(w)
+	if !ok {
+		http.Error(w, "стриминг не поддерживается", http.StatusInternalServerError)
+		return
+	}
+	send := func(ev, data string) {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev, data)
+		flusher.Flush()
+	}
+	ag.SetOnEvent(func(se context.StrategyEvent) {
+		b, _ := json.Marshal(se)
+		send("strategy", string(b))
+	})
+	defer ag.SetOnEvent(nil)
+
+	summary, err := ag.SummarizeDone()
+	if err != nil {
+		eb, _ := json.Marshal(map[string]string{"error": safeError(err)})
+		send("chat_error", string(eb))
+		return
+	}
+	b, _ := json.Marshal(map[string]string{"summary": summary})
+	send("summary", string(b))
 }
 
 // handleReset: POST — очистить историю и состояние стратегии (новый диалог).

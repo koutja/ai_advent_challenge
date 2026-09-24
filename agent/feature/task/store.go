@@ -85,6 +85,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		plan_approved INTEGER NOT NULL DEFAULT 0,
 		validated     INTEGER NOT NULL DEFAULT 0,
 		plan          TEXT NOT NULL DEFAULT '',
+		work          TEXT NOT NULL DEFAULT '',
 		log           TEXT NOT NULL DEFAULT '[]'
 	);`
 	if _, err := db.Exec(ddl); err != nil {
@@ -96,6 +97,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		"plan_approved": "INTEGER NOT NULL DEFAULT 0",
 		"validated":     "INTEGER NOT NULL DEFAULT 0",
 		"plan":          "TEXT NOT NULL DEFAULT ''",
+		"work":          "TEXT NOT NULL DEFAULT ''",
 	}
 	for col, typ := range migrate {
 		if _, err := db.Exec("ALTER TABLE task_state ADD COLUMN " + col + " " + typ); err != nil {
@@ -123,14 +125,14 @@ func (s *SQLiteStore) Save(st State) error {
 	if st.Validated {
 		validated = 1
 	}
-	_, err = s.db.Exec(`INSERT INTO task_state (id, goal, stage, step, expected, paused, plan_approved, validated, plan, log)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err = s.db.Exec(`INSERT INTO task_state (id, goal, stage, step, expected, paused, plan_approved, validated, plan, work, log)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			goal = excluded.goal, stage = excluded.stage, step = excluded.step,
 			expected = excluded.expected, paused = excluded.paused,
 			plan_approved = excluded.plan_approved, validated = excluded.validated,
-			plan = excluded.plan, log = excluded.log`,
-		st.Goal, st.Stage, st.Step, st.Expected, paused, planApproved, validated, st.Plan, string(logJSON))
+			plan = excluded.plan, work = excluded.work, log = excluded.log`,
+		st.Goal, st.Stage, st.Step, st.Expected, paused, planApproved, validated, st.Plan, st.Work, string(logJSON))
 	if err != nil {
 		return fmt.Errorf("сохранить состояние задачи: %w", err)
 	}
@@ -142,8 +144,8 @@ func (s *SQLiteStore) Load() (State, error) {
 	var st State
 	var paused, planApproved, validated int
 	var logJSON string
-	err := s.db.QueryRow(`SELECT goal, stage, step, expected, paused, plan_approved, validated, plan, log FROM task_state WHERE id = 1`).
-		Scan(&st.Goal, &st.Stage, &st.Step, &st.Expected, &paused, &planApproved, &validated, &st.Plan, &logJSON)
+	err := s.db.QueryRow(`SELECT goal, stage, step, expected, paused, plan_approved, validated, plan, work, log FROM task_state WHERE id = 1`).
+		Scan(&st.Goal, &st.Stage, &st.Step, &st.Expected, &paused, &planApproved, &validated, &st.Plan, &st.Work, &logJSON)
 	if err == sql.ErrNoRows {
 		return State{}, nil
 	}
