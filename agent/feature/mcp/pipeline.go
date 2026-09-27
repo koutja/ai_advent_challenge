@@ -114,15 +114,24 @@ func trimWord(w string) string { return strings.Trim(w, ".,!?()«»\"'`:-") }
 
 // prefixHits — второй проход: если точных совпадений нет, ищем по префиксу слов,
 // чтобы поймать словоформы («инструмент» → «инструментов», «скрипт» → «скриптов»).
+//
+// Важно: и токен, и слово должны быть длиной >= 3, иначе короткие слова ложно
+// совпадают по префиксу (например, предлог «с» является префиксом «сЕРИАЛ»).
 func prefixHits(tokens []string) []Doc {
 	var docs []Doc
 	for _, d := range allDocs() {
 		words := strings.Fields(strings.ToLower(d.Title + " " + d.Snippet))
 		score := 0
 		for _, tok := range tokens {
+			if len(tok) < 3 {
+				continue
+			}
 			for _, w := range words {
 				w = trimWord(w)
-				if w != "" && (strings.HasPrefix(w, tok) || strings.HasPrefix(tok, w)) {
+				if len(w) < 3 {
+					continue
+				}
+				if strings.HasPrefix(w, tok) || strings.HasPrefix(tok, w) {
 					score++
 					break
 				}

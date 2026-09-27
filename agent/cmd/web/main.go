@@ -202,7 +202,8 @@ func handleMCPCall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "MCP: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	ctx, cancel := stdctx.WithTimeout(r.Context(), 15*time.Second)
+	// 60 с: generate_document обращается к LLM (внутренний таймаут llm — 45 с).
+	ctx, cancel := stdctx.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	out, err := c.CallTool(ctx, req.Name, req.Arguments)
 	if err != nil {

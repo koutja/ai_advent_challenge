@@ -1116,7 +1116,8 @@ func replConnect(cfg *agent.Config) (*mcpx.Client, error) {
 // runMCPCall подключается к MCP-серверу, вызывает инструмент по имени и печатает
 // результат. Аргументы передаются как JSON-строка (--mcp-args).
 func runMCPCall(cfg *agent.Config, name, argsJSON string) {
-	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 15*time.Second)
+	// 60 с: generate_document обращается к LLM.
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 60*time.Second)
 	defer cancel()
 
 	c, err := mcpx.Connect(ctx, cfg.MCPCommand, cfg.MCPArgs...)
@@ -1308,7 +1309,8 @@ func askYesNo() bool {
 
 // runMCPPipeline подключается к MCP-серверу и прогоняет пайплайн по запросу.
 func runMCPPipeline(cfg *agent.Config, query string) {
-	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 30*time.Second)
+	// 120 с: generate_document ходит в LLM (у llm.Chat внутренний таймаут 45 с).
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 120*time.Second)
 	defer cancel()
 
 	c, err := mcpx.Connect(ctx, cfg.MCPCommand, cfg.MCPArgs...)

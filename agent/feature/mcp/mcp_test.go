@@ -189,6 +189,7 @@ func TestPipelineComposition(t *testing.T) {
 	t.Setenv("MCP_HELPER", "1")
 	outDir := t.TempDir()
 	t.Setenv("MCP_OUTPUT_DIR", outDir)
+	isolateCorpus(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
