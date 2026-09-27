@@ -252,3 +252,52 @@ func TestPipelineComposition(t *testing.T) {
 		t.Fatalf("файл не содержит сводку: %q != %q", data, sumRes.Summary)
 	}
 }
+
+// TestGenerateDocumentTool: инструмент generate_document через клиент создаёт
+// документ (fallback при недоступном LLM), а search потом его находит — так
+// пайплайн «дозаполняет» корпус для неизвестных тем.
+func TestGenerateDocumentTool(t *testing.T) {
+	t.Setenv("MCP_HELPER", "1")
+	t.Setenv("MCP_CORPUS_FILE", filepath.Join(t.TempDir(), "corpus.json"))
+	t.Setenv("LLM_API_KEY", "test-key")
+	t.Setenv("LLM_BASE_URL", "http://127.0.0.1:9") // гарантированно недоступен
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	c, err := Connect(ctx, os.Args[0], "-test.run=TestHelperServer")
+	if err != nil {
+		t.Fatalf("Connect (MCP-соединение): %v", err)
+	}
+	defer c.Close()
+
+	gd, err := c.CallTool(ctx, "generate_document", map[string]any{"topic": "ruby"})
+	if err != nil {
+		t.Fatalf("generate_document: %v", err)
+	}
+	var gen GeneratedDoc
+	if err := json.Unmarshal([]byte(gd), &gen); err != nil {
+		t.Fatalf("generate_document не JSON: %v (%s)", err, gd)
+	}
+	if gen.Source != "fallback" || gen.ID == "" {
+		t.Fatalf("неожиданный документ: %+v", gen)
+	}
+
+	sr, err := c.CallTool(ctx, "search", map[string]any{"query": "ruby"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	var searchRes SearchResult
+	if err := json.Unmarshal([]byte(sr), &searchRes); err != nil {
+		t.Fatalf("search не JSON: %v (%s)", err, sr)
+	}
+	found := false
+	for _, d := range searchRes.Docs {
+		if d.ID == gen.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("search не нашёл сгенерированный документ %s: %+v", gen.ID, searchRes.Docs)
+	}
+}

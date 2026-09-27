@@ -1,6 +1,7 @@
 package mcpx
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,9 @@ var corpus = []Doc{
 	{ID: "doc-006", Title: "Хранение результатов", Snippet: "Результаты сохраняются в JSON или файлы в папке results, игнорируемой git."},
 	{ID: "doc-007", Title: "Зачем нужен Go (Golang)", Snippet: "Go (Golang) нужен для быстрых серверов, консольных утилит и инструментов вроде этого агента."},
 	{ID: "doc-008", Title: "Как подключить MCP-инструменты", Snippet: "Чтобы подключить инструменты, соберите mcp-server, запустите агента и вызовите /mcp-call."},
+	{ID: "doc-009", Title: "JavaScript и TypeScript", Snippet: "JavaScript и TypeScript используются в веб-приложениях, в том числе в интерфейсе этого агента."},
+	{ID: "doc-010", Title: "Python для скриптов", Snippet: "Python удобен для скриптов, анализа данных и прототипирования инструментов."},
+	{ID: "doc-011", Title: "SQLite как хранилище", Snippet: "SQLite хранит историю и память агента в одном файле без отдельного сервера."},
 }
 
 // SearchResult — результат инструмента search.
@@ -36,6 +40,24 @@ type SearchResult struct {
 	Query string `json:"query"`
 	Total int    `json:"total"`
 	Docs  []Doc  `json:"docs"`
+}
+
+// allDocs возвращает статический корпус плюс сгенерированные документы
+// (файл MCP_CORPUS_FILE / results/pipeline/corpus.json).
+func allDocs() []Doc {
+	docs := make([]Doc, 0, len(corpus)+8)
+	docs = append(docs, corpus...)
+	if raw, err := os.ReadFile(corpusFilePath()); err == nil {
+		var f struct {
+			Docs []GeneratedDoc `json:"docs"`
+		}
+		if json.Unmarshal(raw, &f) == nil {
+			for _, g := range f.Docs {
+				docs = append(docs, Doc{ID: g.ID, Title: g.Title, Snippet: g.Snippet})
+			}
+		}
+	}
+	return docs
 }
 
 // Search ищет документы по запросу: запрос разбивается на слова (токены),
@@ -54,7 +76,7 @@ func Search(query string, limit int) SearchResult {
 		score int
 	}
 	var hits []hit
-	for _, d := range corpus {
+	for _, d := range allDocs() {
 		hay := strings.ToLower(d.Title + " " + d.Snippet)
 		if len(tokens) == 0 {
 			hits = append(hits, hit{doc: d})
@@ -70,6 +92,12 @@ func Search(query string, limit int) SearchResult {
 			hits = append(hits, hit{doc: d, score: score})
 		}
 	}
+	// Ни одного точного совпадения — пробуем префиксное (словоформы).
+	if len(hits) == 0 {
+		for i, d := range prefixHits(tokens) {
+			hits = append(hits, hit{doc: d, score: len(tokens) - i})
+		}
+	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
 	if len(hits) > limit {
 		hits = hits[:limit]
@@ -79,6 +107,32 @@ func Search(query string, limit int) SearchResult {
 	}
 	res.Total = len(res.Docs)
 	return res
+}
+
+// словоТрим убирает пунктуацию с краёв слова.
+func trimWord(w string) string { return strings.Trim(w, ".,!?()«»\"'`:-") }
+
+// prefixHits — второй проход: если точных совпадений нет, ищем по префиксу слов,
+// чтобы поймать словоформы («инструмент» → «инструментов», «скрипт» → «скриптов»).
+func prefixHits(tokens []string) []Doc {
+	var docs []Doc
+	for _, d := range allDocs() {
+		words := strings.Fields(strings.ToLower(d.Title + " " + d.Snippet))
+		score := 0
+		for _, tok := range tokens {
+			for _, w := range words {
+				w = trimWord(w)
+				if w != "" && (strings.HasPrefix(w, tok) || strings.HasPrefix(tok, w)) {
+					score++
+					break
+				}
+			}
+		}
+		if score > 0 {
+			docs = append(docs, d)
+		}
+	}
+	return docs
 }
 
 // SummarizeResult — результат инструмента summarize.

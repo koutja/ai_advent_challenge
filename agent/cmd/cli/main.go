@@ -221,7 +221,7 @@ func main() {
 				fmt.Print("> ")
 				continue
 			}
-			out, err := execPipeline(stdctx.Background(), c, query)
+			out, err := execPipeline(stdctx.Background(), c, query, false)
 			if err != nil {
 				fmt.Println("ошибка:", err)
 			} else {
@@ -1196,7 +1196,7 @@ func runMCPDemo(cfg *agent.Config) {
 //  3. save_to_file— сохранить сводку в файл (вход шага 3 — вывод шага 2).
 //
 // Данные между инструментами передаются через CallTool (JSON в JSON).
-func execPipeline(ctx stdctx.Context, c *mcpx.Client, query string) (string, error) {
+func execPipeline(ctx stdctx.Context, c *mcpx.Client, query string, interactive bool) (string, error) {
 	var b strings.Builder
 
 	// Шаг 1: search
@@ -1208,18 +1208,41 @@ func execPipeline(ctx stdctx.Context, c *mcpx.Client, query string) (string, err
 	if err := json.Unmarshal([]byte(sr), &searchRes); err != nil {
 		return "", fmt.Errorf("разбор результата search: %w", err)
 	}
-	if len(searchRes.Docs) == 0 {
-		return "", fmt.Errorf("по запросу %q ничего не найдено", query)
-	}
-	fmt.Fprintf(&b, "1) search(%q): %d документов\n", query, searchRes.Total)
-	for _, d := range searchRes.Docs {
-		fmt.Fprintf(&b, "   • [%s] %s — %s\n", d.ID, d.Title, d.Snippet)
-	}
 
-	// Шаг 2: summarize — на вход подаётся контент из шага 1.
 	var parts []string
-	for _, d := range searchRes.Docs {
-		parts = append(parts, d.Title+". "+d.Snippet)
+	if len(searchRes.Docs) == 0 {
+		fmt.Fprintf(&b, "1) search(%q): 0 документов\n", query)
+		if interactive {
+			// Запрос вне корпуса: спрашиваем, не сформировать ли документ через LLM.
+			fmt.Print("   Документ не найден. Сформировать его через LLM и добавить в корпус? [y/N] ")
+			if askYesNo() {
+				gd, err := c.CallTool(ctx, "generate_document", map[string]any{"topic": query})
+				if err != nil {
+					return "", fmt.Errorf("generate_document: %w", err)
+				}
+				var genRes mcpx.GeneratedDoc
+				if err := json.Unmarshal([]byte(gd), &genRes); err != nil {
+					return "", fmt.Errorf("разбор результата generate_document: %w", err)
+				}
+				fmt.Fprintf(&b, "   создан документ [%s] %s — %s (источник: %s)\n", genRes.ID, genRes.Title, genRes.Snippet, genRes.Source)
+				parts = []string{genRes.Title + ". " + genRes.Snippet}
+			} else {
+				fmt.Fprintln(&b, "   пропускаю генерацию, сохраняю заметку")
+				parts = []string{fmt.Sprintf("По запросу %q в локальном корпусе ничего не найдено.", query)}
+			}
+		} else {
+			fmt.Fprintln(&b, "   тема не в локальном корпусе — сохраняю заметку (для пополнения вызовите generate_document)")
+			parts = []string{fmt.Sprintf("По запросу %q в локальном корпусе ничего не найдено. Вызовите generate_document, чтобы пополнить корпус.", query)}
+		}
+	} else {
+		fmt.Fprintf(&b, "1) search(%q): %d документов\n", query, searchRes.Total)
+		for _, d := range searchRes.Docs {
+			fmt.Fprintf(&b, "   • [%s] %s — %s\n", d.ID, d.Title, d.Snippet)
+		}
+		// Шаг 2: summarize — на вход подаётся контент из шага 1.
+		for _, d := range searchRes.Docs {
+			parts = append(parts, d.Title+". "+d.Snippet)
+		}
 	}
 	su, err := c.CallTool(ctx, "summarize", map[string]any{"text": strings.Join(parts, "\n\n"), "max_words": 40})
 	if err != nil {
@@ -1270,6 +1293,19 @@ func slugify(s string) string {
 	return "result"
 }
 
+// askYesNo читает ответ пользователя (y/yes/да/д/1 — true).
+func askYesNo() bool {
+	sc := bufio.NewScanner(os.Stdin)
+	if !sc.Scan() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(sc.Text())) {
+	case "y", "yes", "да", "д", "1":
+		return true
+	}
+	return false
+}
+
 // runMCPPipeline подключается к MCP-серверу и прогоняет пайплайн по запросу.
 func runMCPPipeline(cfg *agent.Config, query string) {
 	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 30*time.Second)
@@ -1281,7 +1317,7 @@ func runMCPPipeline(cfg *agent.Config, query string) {
 	}
 	defer c.Close()
 
-	out, err := execPipeline(ctx, c, query)
+	out, err := execPipeline(ctx, c, query, true)
 	if err != nil {
 		die(err)
 	}

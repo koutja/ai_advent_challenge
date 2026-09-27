@@ -83,6 +83,7 @@ make reset-history                   # удалить agent_history.db (сбро
 | `search`        | `query` (обязательно), `limit?`                                          | `{query, total, docs[]}` |
 | `summarize`     | `text`, `max_words?`                                                     | `{summary, words, sources}` |
 | `save_to_file`  | `filename`, `content`                                                    | `{path, bytes}` → `results/pipeline/` |
+| `generate_document` | `topic`                                                              | `{id, title, snippet, source: llm\|fallback}` |
 
 Описание входных параметров попадает в JSON-схему инструмента автоматически
 (из типов-структур и `jsonschema`-тегов), т.е. регистрация инструмента +
@@ -146,6 +147,29 @@ make reset-history                   # удалить agent_history.db (сбро
 Проверка цепочки автоматизирована в `TestPipelineComposition`: сводка строится
 по найденным документам, а сохранённый файл в точности равен сводке.
 
+### Дозаполнение корпуса через LLM
+
+Если `search` не находит документы по запросу, пайплайн **спрашивает
+пользователя**:
+
+```
+   Документ не найден. Сформировать его через LLM и добавить в корпус? [y/N]
+```
+
+- `y` → инструмент `generate_document {topic}` вызывает общий пакет [`llm`](../llm)
+  (использует те же `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` из `.env`, что и
+  агент) и добавляет результат в персистентный корпус
+  `results/pipeline/corpus.json` (env `MCP_CORPUS_FILE`). Затем цепочка
+  продолжается: сводка по новому документу → `save_to_file`.
+- `n` → сохраняется короткая заметка, пайплайн не падает.
+- Если LLM недоступен (нет ключа/сети), `generate_document` возвращает
+  детерминированный fallback (`source: "fallback"`) — цепочка всё равно
+  завершается.
+
+Дальнейшие поиски этой темы уже находят документ (корпус персистентный).
+Проверка: `TestGenerateDocumentFallback`, `TestGenerateDocumentTool`,
+`TestCorpusStoreRoundTrip`.
+
 ### Вызов инструмента
 
 Вызвать инструмент и получить результат можно флагом `--mcp-call` (без REPL и
@@ -175,11 +199,12 @@ make run-mcp-call TOOL=create_task ARGS='{"title":"Отчёт","priority":"high"
 Пример вывода `make run-mcp-tools`:
 
 ```
-MCP-соединение установлено (сервер: bin/mcp-server). Инструментов: 13
+MCP-соединение установлено (сервер: bin/mcp-server). Инструментов: 14
   • collect_start    Запускает периодический сбор точек данных метрики…
   • collect_status   Агрегат по точкам данных: count/min/max/avg/latest…
   • create_task      Создаёт задачу в mock API и возвращает её полную запись.
   • echo             Возвращает переданное сообщение без изменений.
+  • generate_document Формирует документ по теме через LLM…
   • get_summary      Возвращает агрегированную сводку…
   • get_task         Возвращает задачу из mock API по её id.
   • get_time         Возвращает текущее время сервера в формате RFC3339.

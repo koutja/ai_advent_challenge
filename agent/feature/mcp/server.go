@@ -130,6 +130,17 @@ func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
 		return nil, res, nil
 	})
 
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "generate_document",
+		Description: "Формирует документ по теме через LLM (LLM_API_KEY/LLM_BASE_URL/LLM_MODEL из .env), добавляет его в корпус и возвращает id/title/snippet. Без LLM — детерминированный fallback.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in generateDocInput) (*mcp.CallToolResult, GeneratedDoc, error) {
+		doc, err := GenerateDocument(in.Topic)
+		if err != nil {
+			return nil, GeneratedDoc{}, err
+		}
+		return nil, doc, nil
+	})
+
 	// --- Планировщик: напоминания ---
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "reminder_add",
@@ -273,6 +284,11 @@ type summarizeInput struct {
 	Text string `json:"text" jsonschema:"текст, из которого строится сводка"`
 	// MaxWords — лимит слов сводки (по умолчанию 40).
 	MaxWords int `json:"max_words,omitempty" jsonschema:"лимит слов сводки; по умолчанию 40"`
+}
+
+type generateDocInput struct {
+	// Topic — тема документа (обязательно).
+	Topic string `json:"topic" jsonschema:"тема документа (обязательное поле)"`
 }
 
 type saveToFileInput struct {

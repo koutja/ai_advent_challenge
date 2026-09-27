@@ -112,6 +112,59 @@ func TestSanitizeFilename(t *testing.T) {
 	}
 }
 
+// TestCorpusStoreRoundTrip: сгенерированные документы сохраняются в корпус
+// и становятся доступны поиску.
+func TestCorpusStoreRoundTrip(t *testing.T) {
+	t.Setenv("MCP_CORPUS_FILE", filepath.Join(t.TempDir(), "corpus.json"))
+
+	cs, err := openCorpusStore()
+	if err != nil {
+		t.Fatalf("openCorpusStore: %v", err)
+	}
+	// Уникальная тема, которой нет в статическом корпусе.
+	added, err := cs.add(GeneratedDoc{Topic: "ml", Title: "Про машинное обучение", Snippet: "Машинное обучение помогает агентам принимать решения.", Source: "llm"})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if added.ID == "" {
+		t.Fatalf("документу не присвоен id")
+	}
+
+	res := Search("обучение", 5)
+	if res.Total == 0 {
+		t.Fatalf("search не видит сгенерированный документ")
+	}
+	if res.Docs[0].ID != added.ID {
+		t.Fatalf("search вернул не тот документ: %+v", res.Docs[0])
+	}
+}
+
+// TestGenerateDocumentFallback: при недоступном LLM возвращается
+// детерминированный fallback, и документ попадает в корпус.
+func TestGenerateDocumentFallback(t *testing.T) {
+	t.Setenv("MCP_CORPUS_FILE", filepath.Join(t.TempDir(), "corpus.json"))
+	// Ключ задан, но эндпоинт гарантированно недоступен -> быстрый отказ без сети.
+	t.Setenv("LLM_API_KEY", "test-key")
+	t.Setenv("LLM_BASE_URL", "http://127.0.0.1:9")
+
+	// Тема, которой нет в статическом корпусе (чтобы не мешал doc-009 JavaScript).
+	doc, err := GenerateDocument("ruby")
+	if err != nil {
+		t.Fatalf("GenerateDocument: %v", err)
+	}
+	if doc.Source != "fallback" {
+		t.Fatalf("ожидали fallback, получили %q", doc.Source)
+	}
+	if doc.Title != "ruby" {
+		t.Fatalf("title fallback должен быть темой: %q", doc.Title)
+	}
+
+	res := Search("ruby", 5)
+	if res.Total != 1 || res.Docs[0].ID != doc.ID {
+		t.Fatalf("search не нашёл сгенерированный документ: %+v (doc=%+v)", res, doc)
+	}
+}
+
 // TestSaveFileRoundTrip: файл записывается и читается обратно.
 func TestSaveFileRoundTrip(t *testing.T) {
 	t.Setenv("MCP_OUTPUT_DIR", t.TempDir())
