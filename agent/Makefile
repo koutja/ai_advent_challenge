@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -49,6 +49,11 @@ run-mcp-demo:
 # Пример: make run-mcp-pipeline QUERY=mcp
 run-mcp-pipeline:
 	go run ./cmd/cli --mcp-pipeline "$(QUERY)"
+
+# ===== MCP: длинный флоу через несколько серверов (tasks/scheduler/knowledge) =====
+# Пример: make run-mcp-orchestrate QUERY=mcp
+run-mcp-orchestrate:
+	go run ./cmd/cli --mcp-orchestrate "$(QUERY)"
 
 # ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
 build-mcp-server:

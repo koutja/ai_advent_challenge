@@ -1,24 +1,23 @@
 // Package mcpx — интеграция Model Context Protocol (MCP) в ядро агента.
 //
 // Пакет построен на официальном Go SDK: github.com/modelcontextprotocol/go-sdk.
-// Здесь два компонента:
+// Компоненты:
 //
-//   - NewServer — переиспользуемый MCP-сервер с инструментами. Из него собирается
-//     отдельный бинарник cmd/mcp-server (запускается как отдельный процесс),
-//     а также используется в тестах.
+//   - BuildServer / NewServer — MCP-сервер с инструментами. Один бинарник
+//     cmd/mcp-server может обслуживать разные «домены» (--server):
+//     tasks | scheduler | knowledge | all. Это позволяет регистрировать
+//     несколько MCP-серверов и маршрутизировать запросы между ними (registry.go).
 //   - Connect — stdio-клиент, который запускает сервер как дочерний процесс
 //     и устанавливает соединение (handshake Initialize). Клиент умеет
 //     перечислять инструменты (ListTools) и вызывать их (CallTool).
 //
-// Инструменты:
-//   - get_task / create_task — поверх встроенного mock HTTP-API (см. api.go);
-//   - reminder_add / reminders_status / collect_start / collect_status /
-//     summary_start / get_summary — планировщик и фоновые задачи (см. store.go,
-//     scheduler.go): отложенные напоминания, периодический сбор данных,
-//     регулярные снимки сводки с агрегацией и JSON-персистентностью.
-//
-// Такой расклад («сервер отдельным процессом, клиент подключается по stdio»)
-// близок к реальному деплою MCP-серверов.
+// Домены инструментов:
+//   - tasks      — get_task / create_task (встроенный mock HTTP-API, см. api.go);
+//   - scheduler  — reminder_add / reminders_status / collect_start /
+//     collect_status / summary_start / get_summary (см. store.go, scheduler.go);
+//   - knowledge  — search / summarize / save_to_file / generate_document
+//     (см. pipeline.go, corpus.go);
+//   - all        — демо (get_time, echo) + все домены выше.
 package mcpx
 
 import (
@@ -36,14 +35,43 @@ const (
 	ServerVersion = "1.0.0"
 )
 
-// NewServer собирает MCP-сервер со всеми инструментами: mock API, планировщик
-// (JSON-хранилище + тикер, catch-up при старте).
+// Имена доменов MCP-серверов.
+const (
+	ServerTasks     = "tasks"
+	ServerScheduler = "scheduler"
+	ServerKnowledge = "knowledge"
+)
+
+// NewServer собирает MCP-сервер со всеми инструментами (обратная совместимость).
 func NewServer() *mcp.Server {
-	api := newMockAPI()
-	st := openDefaultStore()
-	sch := NewScheduler(st)
-	sch.Start()
-	return newServerWith(api, st, sch)
+	return BuildServer("all")
+}
+
+// BuildServer собирает MCP-сервер с инструментами указанного домена:
+// tasks | scheduler | knowledge | all (по умолчанию all).
+func BuildServer(kind string) *mcp.Server {
+	switch kind {
+	case ServerTasks:
+		return registerTasks(newMockAPI())
+	case ServerScheduler:
+		st := openDefaultStore()
+		sch := NewScheduler(st)
+		sch.Start()
+		return registerScheduler(st)
+	case ServerKnowledge:
+		return registerKnowledge()
+	default:
+		api := newMockAPI()
+		st := openDefaultStore()
+		sch := NewScheduler(st)
+		sch.Start()
+		s := newBaseServer()
+		addDemoTools(s)
+		addTasksTools(s, api)
+		addSchedulerTools(s, st)
+		addKnowledgeTools(s)
+		return s
+	}
 }
 
 // openDefaultStore открывает JSON-хранилище планировщика. Путь — из env
@@ -62,11 +90,30 @@ func openDefaultStore() *Store {
 	return st
 }
 
-// newServerWith собирает сервер с заданными зависимостями (для тестов).
-func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: ServerVersion}, nil)
+func newBaseServer() *mcp.Server {
+	return mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: ServerVersion}, nil)
+}
 
-	// --- Демо-инструменты ---
+func registerTasks(api *mockAPI) *mcp.Server {
+	s := newBaseServer()
+	addTasksTools(s, api)
+	return s
+}
+
+func registerScheduler(st *Store) *mcp.Server {
+	s := newBaseServer()
+	addSchedulerTools(s, st)
+	return s
+}
+
+func registerKnowledge() *mcp.Server {
+	s := newBaseServer()
+	addKnowledgeTools(s)
+	return s
+}
+
+// addDemoTools регистрирует общие демо-инструменты (только в домене all).
+func addDemoTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "get_time",
 		Description: "Возвращает текущее время сервера в формате RFC3339.",
@@ -80,8 +127,10 @@ func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in echoInput) (*mcp.CallToolResult, echoOutput, error) {
 		return nil, echoOutput{Echo: in.Message}, nil
 	})
+}
 
-	// --- Mock HTTP API ---
+// addTasksTools регистрирует инструменты домена tasks (mock HTTP API).
+func addTasksTools(s *mcp.Server, api *mockAPI) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "get_task",
 		Description: "Возвращает задачу из mock API по её id.",
@@ -103,8 +152,10 @@ func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
 		}
 		return nil, t, nil
 	})
+}
 
-	// --- Композиция: search → summarize → save_to_file ---
+// addKnowledgeTools регистрирует инструменты домена knowledge (пайплайн/корпус).
+func addKnowledgeTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "search",
 		Description: "Ищет документы в локальном корпусе и возвращает id/title/snippet.",
@@ -140,8 +191,10 @@ func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
 		}
 		return nil, doc, nil
 	})
+}
 
-	// --- Планировщик: напоминания ---
+// addSchedulerTools регистрирует инструменты домена scheduler (планировщик).
+func addSchedulerTools(s *mcp.Server, st *Store) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "reminder_add",
 		Description: "Ставит отложенное напоминание; сработает через in_minutes (0 — при ближайшем тике).",
@@ -161,7 +214,6 @@ func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
 		return nil, reminderStatsOutput{Total: rs.Total, Pending: rs.Pending, Fired: rs.Fired}, nil
 	})
 
-	// --- Планировщик: периодический сбор данных ---
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "collect_start",
 		Description: "Запускает периодический сбор точек данных метрики (детерминированные значения).",
@@ -197,7 +249,6 @@ func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
 		return nil, out, nil
 	})
 
-	// --- Планировщик: регулярный summary ---
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "summary_start",
 		Description: "Запускает периодические снимки сводки (агрегат на текущий момент).",
@@ -242,8 +293,6 @@ func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
 			LastSnapshotAt: last,
 		}, nil
 	})
-
-	return s
 }
 
 // --- Типы ввода/вывода инструментов (схемы выводятся автоматически) ---

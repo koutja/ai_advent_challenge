@@ -12,19 +12,28 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestHelperServer — не настоящий тест, а сервер-помощник. Когда тестовый
-// бинарник запускается как subprocess с MCP_HELPER=1, этот тест превращается
-// в stdio MCP-сервер. Это позволяет проверить полный цикл «клиент по stdio ->
-// отдельный серверный процесс» без внешних бинарников.
-func TestHelperServer(t *testing.T) {
+// runHelperServer — сервер-помощник. Когда тестовый бинарник запускается как
+// subprocess с MCP_HELPER=1, нужный тест превращается в stdio MCP-сервер домена
+// domain. Это позволяет проверить «клиент по stdio -> отдельный серверный
+// процесс» без внешних бинарников, в том числе для нескольких доменов.
+func runHelperServer(t *testing.T, domain string) {
+	t.Helper()
 	if os.Getenv("MCP_HELPER") != "1" {
 		t.Skip("helper-процесс для запуска in-process MCP-сервера")
 	}
-	server := NewServer()
+	server := BuildServer(domain)
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		t.Fatalf("helper server: %v", err)
+		t.Fatalf("helper server (%s): %v", domain, err)
 	}
 }
+
+// TestHelperServer — все инструменты (домен all), обратная совместимость.
+func TestHelperServer(t *testing.T) { runHelperServer(t, "all") }
+
+// Помощники-домены для оркестратора.
+func TestHelperServerTasks(t *testing.T)     { runHelperServer(t, ServerTasks) }
+func TestHelperServerScheduler(t *testing.T) { runHelperServer(t, ServerScheduler) }
+func TestHelperServerKnowledge(t *testing.T) { runHelperServer(t, ServerKnowledge) }
 
 // TestConnectAndListTools проверяет оба обязательных требования:
 //   - соединение с MCP устанавливается;

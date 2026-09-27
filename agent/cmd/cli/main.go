@@ -44,6 +44,7 @@ func main() {
 	mcpArgs := flag.String("mcp-args", "", "JSON-аргументы инструмента для --mcp-call (опционально)")
 	mcpDemo := flag.Bool("mcp-demo", false, "демо планировщика: напоминание + периодический сбор данных + сводка")
 	mcpPipeline := flag.String("mcp-pipeline", "", "пайплайн: search → summarize → save_to_file по запросу")
+	mcpOrchestrate := flag.String("mcp-orchestrate", "", "длинный флоу через несколько MCP-серверов по теме")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -65,6 +66,10 @@ func main() {
 	}
 	if *mcpPipeline != "" {
 		runMCPPipeline(cfg, *mcpPipeline)
+		return
+	}
+	if *mcpOrchestrate != "" {
+		runMCPOrchestrate(cfg, *mcpOrchestrate)
 		return
 	}
 
@@ -226,6 +231,29 @@ func main() {
 				fmt.Println("ошибка:", err)
 			} else {
 				fmt.Println("== Пайплайн: search → summarize → save_to_file ==")
+				fmt.Print(out)
+			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/mcp-orchestrate"):
+			topic := strings.TrimSpace(strings.TrimPrefix(line, "/mcp-orchestrate"))
+			if topic == "" {
+				fmt.Println("использование: /mcp-orchestrate <тема>")
+				fmt.Print("> ")
+				continue
+			}
+			reg := mcpx.NewRegistry(mcpSpecs(cfg))
+			if err := reg.ConnectAll(stdctx.Background()); err != nil {
+				fmt.Println("ошибка:", err)
+				fmt.Print("> ")
+				continue
+			}
+			out, err := orchestrateFlow(stdctx.Background(), reg, topic)
+			reg.Close()
+			if err != nil {
+				fmt.Println("ошибка:", err)
+			} else {
+				fmt.Println("== Длинный флоу: 3 MCP-сервера ==")
 				fmt.Print(out)
 			}
 			fmt.Print("> ")
@@ -1187,6 +1215,139 @@ func runMCPDemo(cfg *agent.Config) {
 		die(fmt.Errorf("get_summary: %w", err))
 	}
 	fmt.Println("get_summary      ->", out)
+}
+
+// mcpSpecs собирает список MCP-серверов для оркестратора из config.json
+// (по умолчанию — три домена одного бинарника).
+func mcpSpecs(cfg *agent.Config) []mcpx.ServerSpec {
+	if len(cfg.MCPServers) == 0 {
+		return mcpx.DefaultServerSpecs(cfg.MCPCommand)
+	}
+	specs := make([]mcpx.ServerSpec, 0, len(cfg.MCPServers))
+	for _, s := range cfg.MCPServers {
+		specs = append(specs, mcpx.ServerSpec{Name: s.Name, Command: s.Command, Args: s.Args})
+	}
+	return specs
+}
+
+// orchestrateFlow выполняет длинный флоу с инструментами РАЗНЫХ серверов
+// (knowledge → tasks → scheduler → knowledge) и печатает маршрут каждого вызова.
+func orchestrateFlow(ctx stdctx.Context, reg *mcpx.Registry, topic string) (string, error) {
+	var b strings.Builder
+
+	// 1) search (knowledge) — получить данные.
+	sr, err := reg.CallTool(ctx, "search", map[string]any{"query": topic, "limit": 2})
+	if err != nil {
+		return "", fmt.Errorf("шаг search: %w", err)
+	}
+	var searchRes mcpx.SearchResult
+	if err := json.Unmarshal([]byte(sr.Output), &searchRes); err != nil {
+		return "", fmt.Errorf("разбор search: %w", err)
+	}
+	fmt.Fprintf(&b, "1) search(%q) → %s\n", topic, sr.Server)
+	if len(searchRes.Docs) == 0 {
+		fmt.Fprintln(&b, "   документов не найдено, сводка будет по заметке")
+	}
+	for _, d := range searchRes.Docs {
+		fmt.Fprintf(&b, "   • [%s] %s — %s\n", d.ID, d.Title, d.Snippet)
+	}
+
+	// 2) summarize (knowledge) — обработать данные.
+	var parts []string
+	for _, d := range searchRes.Docs {
+		parts = append(parts, d.Title+". "+d.Snippet)
+	}
+	if len(parts) == 0 {
+		parts = []string{fmt.Sprintf("Документов по теме %q нет.", topic)}
+	}
+	su, err := reg.CallTool(ctx, "summarize", map[string]any{"text": strings.Join(parts, "\n\n"), "max_words": 40})
+	if err != nil {
+		return "", fmt.Errorf("шаг summarize: %w", err)
+	}
+	var sumRes mcpx.SummarizeResult
+	if err := json.Unmarshal([]byte(su.Output), &sumRes); err != nil {
+		return "", fmt.Errorf("разбор summarize: %w", err)
+	}
+	fmt.Fprintf(&b, "2) summarize → %s: %s\n", su.Server, sumRes.Summary)
+
+	// 3) create_task (tasks) — создать задачу из сводки.
+	title := sumRes.Summary
+	if len(title) > 60 {
+		title = title[:60]
+	}
+	tk, err := reg.CallTool(ctx, "create_task", map[string]any{"title": title, "priority": "high", "assignee": "agent"})
+	if err != nil {
+		return "", fmt.Errorf("шаг create_task: %w", err)
+	}
+	var taskRes mcpx.Task
+	if err := json.Unmarshal([]byte(tk.Output), &taskRes); err != nil {
+		return "", fmt.Errorf("разбор create_task: %w", err)
+	}
+	fmt.Fprintf(&b, "3) create_task → %s: задача %s создана\n", tk.Server, taskRes.ID)
+
+	// 4) reminder_add (scheduler) — напомнить про задачу.
+	rm, err := reg.CallTool(ctx, "reminder_add", map[string]any{"text": "Проверить задачу " + taskRes.ID, "in_minutes": 0})
+	if err != nil {
+		return "", fmt.Errorf("шаг reminder_add: %w", err)
+	}
+	var remRes struct {
+		ID    string `json:"id"`
+		DueAt string `json:"due_at"`
+	}
+	if err := json.Unmarshal([]byte(rm.Output), &remRes); err != nil {
+		return "", fmt.Errorf("разбор reminder_add: %w", err)
+	}
+	fmt.Fprintf(&b, "4) reminder_add → %s: напоминание %s до %s\n", rm.Server, remRes.ID, remRes.DueAt)
+
+	// 5) collect_start (scheduler) — периодический сбор данных.
+	cs, err := reg.CallTool(ctx, "collect_start", map[string]any{"metric": "orchestrated", "interval_seconds": 1, "iterations": 3})
+	if err != nil {
+		return "", fmt.Errorf("шаг collect_start: %w", err)
+	}
+	fmt.Fprintf(&b, "5) collect_start → %s: %s\n", cs.Server, cs.Output)
+
+	// 6) get_summary (scheduler) — агрегированный итог планировщика.
+	gs, err := reg.CallTool(ctx, "get_summary", nil)
+	if err != nil {
+		return "", fmt.Errorf("шаг get_summary: %w", err)
+	}
+	fmt.Fprintf(&b, "6) get_summary → %s: %s\n", gs.Server, gs.Output)
+
+	// 7) save_to_file (knowledge) — сохранить итоговый отчёт.
+	report := fmt.Sprintf(
+		"# Оркестрация по теме: %s\n\n## Сводка\n%s\n\n## Задача\n%s (%s)\n\n## Итог планировщика\n%s\n",
+		topic, sumRes.Summary, taskRes.Title, taskRes.ID, gs.Output)
+	sf, err := reg.CallTool(ctx, "save_to_file", map[string]any{"filename": "orchestration_" + slugify(topic) + ".md", "content": report})
+	if err != nil {
+		return "", fmt.Errorf("шаг save_to_file: %w", err)
+	}
+	var saveRes mcpx.SaveFileResult
+	if err := json.Unmarshal([]byte(sf.Output), &saveRes); err != nil {
+		return "", fmt.Errorf("разбор save_to_file: %w", err)
+	}
+	fmt.Fprintf(&b, "7) save_to_file → %s: %s (%d байт)\n", sf.Server, saveRes.Path, saveRes.Bytes)
+
+	return b.String(), nil
+}
+
+// runMCPOrchestrate подключается к нескольким MCP-серверам и прогоняет длинный флоу.
+func runMCPOrchestrate(cfg *agent.Config, topic string) {
+	// 120 с: generate_document ходит в LLM, плюс N процессов.
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 120*time.Second)
+	defer cancel()
+
+	reg := mcpx.NewRegistry(mcpSpecs(cfg))
+	if err := reg.ConnectAll(ctx); err != nil {
+		die(fmt.Errorf("оркестратор: %w", err))
+	}
+	defer reg.Close()
+
+	out, err := orchestrateFlow(ctx, reg, topic)
+	if err != nil {
+		die(err)
+	}
+	fmt.Println("== Длинный флоу: 3 MCP-сервера ==")
+	fmt.Print(out)
 }
 
 // execPipeline выполняет цепочку MCP-инструментов:

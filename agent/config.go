@@ -45,6 +45,16 @@ type Config struct {
 	MCPCommand string `json:"mcp_command"`
 	// MCPArgs — необязательные аргументы команды MCP-сервера.
 	MCPArgs []string `json:"mcp_args,omitempty"`
+	// MCPServers — список серверов для оркестратора (--mcp-orchestrate).
+	// По умолчанию: три домена одного бинарника (tasks|scheduler|knowledge).
+	MCPServers []MCPServerCfg `json:"mcp_servers,omitempty"`
+}
+
+// MCPServerCfg — описание одного MCP-сервера для оркестратора.
+type MCPServerCfg struct {
+	Name    string   `json:"name"`
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
 }
 
 // DefaultConfig возвращает конфиг со значениями по умолчанию.
@@ -67,6 +77,11 @@ func DefaultConfig() *Config {
 		FactsKeyMax:     50,
 		FactsExtractor:  memory.ExtractorLLM, // по умолчанию точный LLM-режим извлечения
 		MCPCommand:      "bin/mcp-server",
+		MCPServers: []MCPServerCfg{
+			{Name: "tasks", Command: "bin/mcp-server", Args: []string{"--server", "tasks"}},
+			{Name: "scheduler", Command: "bin/mcp-server", Args: []string{"--server", "scheduler"}},
+			{Name: "knowledge", Command: "bin/mcp-server", Args: []string{"--server", "knowledge"}},
+		},
 	}
 }
 

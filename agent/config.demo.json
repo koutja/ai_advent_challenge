@@ -12,5 +12,10 @@
   "facts_keep_last": 6,
   "facts_key_max": 50,
   "facts_extractor": "heuristic",
-  "mcp_command": "bin/mcp-server"
+  "mcp_command": "bin/mcp-server",
+  "mcp_servers": [
+    { "name": "tasks", "command": "bin/mcp-server", "args": ["--server", "tasks"] },
+    { "name": "scheduler", "command": "bin/mcp-server", "args": ["--server", "scheduler"] },
+    { "name": "knowledge", "command": "bin/mcp-server", "args": ["--server", "knowledge"] }
+  ]
 }

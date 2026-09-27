@@ -170,6 +170,36 @@ make reset-history                   # удалить agent_history.db (сбро
 Проверка: `TestGenerateDocumentFallback`, `TestGenerateDocumentTool`,
 `TestCorpusStoreRoundTrip`.
 
+### Оркестрация нескольких MCP-серверов
+
+Один бинарник [`cmd/mcp-server`](cmd/mcp-server) умеет обслуживать разные
+«домены» инструментов через флаг `--server`:
+
+| Домен       | Инструменты |
+|-------------|-------------|
+| `tasks`     | `get_task`, `create_task` |
+| `scheduler` | `reminder_add`, `reminders_status`, `collect_start`, `collect_status`, `summary_start`, `get_summary` |
+| `knowledge` | `search`, `summarize`, `save_to_file`, `generate_document` |
+| `all`       | демо (`get_time`, `echo`) + все домены (по умолчанию) |
+
+Оркестратор [`feature/mcp/registry.go`](feature/mcp/registry.go) подключается к
+нескольким серверам, по `tools/list` строит таблицу «инструмент → сервер»
+(дубли имён — ошибка маршрутизации) и направляет вызовы нужному серверу.
+Список серверов — в `config.json` (`mcp_servers`), по умолчанию три домена.
+
+Длинный флоу через разные серверы — `--mcp-orchestrate <тема>` (или REPL
+`/mcp-orchestrate <тема>`):
+
+```bash
+make run-mcp-orchestrate QUERY=mcp
+```
+
+Флоу: `search` (knowledge) → `summarize` (knowledge) → `create_task` (tasks) →
+`reminder_add`/`collect_start`/`get_summary` (scheduler) → `save_to_file`
+(knowledge). Каждый шаг печатает выбранный сервер — видна корректность
+маршрутизации и порядка. Проверка: `TestRegistryRouting`,
+`TestRegistryDuplicateTools`, `TestOrchestrateFlow`.
+
 ### Вызов инструмента
 
 Вызвать инструмент и получить результат можно флагом `--mcp-call` (без REPL и
@@ -278,6 +308,7 @@ CLI-сравнение стратегий (`--compare-strategies`) оставл�
 | `/mcp-tools` | показать список MCP-инструментов |
 | `/mcp-call <имя> <json>` | вызвать MCP-инструмент и напечатать результат |
 | `/mcp-pipeline <запрос>` | пайплайн search → summarize → save_to_file |
+| `/mcp-orchestrate <тема>` | длинный флоу через несколько MCP-серверов |
 | `/invariants` | показать активные инварианты |
 | `/invariant add <cat>|<title>|<text>` | добавить правило (архитектура\|техническое решение\|стек\|бизнес-правило) |
 | `/invariant rm <id>` `/invariant show <id>` | удалить / показать инвариант |
