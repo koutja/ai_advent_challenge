@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -26,6 +27,8 @@ var corpus = []Doc{
 	{ID: "doc-004", Title: "Композиция инструментов", Snippet: "Пайплайн из нескольких MCP-инструментов передаёт данные от шага к шагу."},
 	{ID: "doc-005", Title: "Агрегация метрик", Snippet: "Сводка считает count, min, max, avg и latest по собранным точкам данных."},
 	{ID: "doc-006", Title: "Хранение результатов", Snippet: "Результаты сохраняются в JSON или файлы в папке results, игнорируемой git."},
+	{ID: "doc-007", Title: "Зачем нужен Go (Golang)", Snippet: "Go (Golang) нужен для быстрых серверов, консольных утилит и инструментов вроде этого агента."},
+	{ID: "doc-008", Title: "Как подключить MCP-инструменты", Snippet: "Чтобы подключить инструменты, соберите mcp-server, запустите агента и вызовите /mcp-call."},
 }
 
 // SearchResult — результат инструмента search.
@@ -35,22 +38,44 @@ type SearchResult struct {
 	Docs  []Doc  `json:"docs"`
 }
 
-// Search ищет документы, где query встречается в заголовке или сниппете
-// (регистронезависимо). Возвращает не более limit результатов (по умолчанию 5).
+// Search ищет документы по запросу: запрос разбивается на слова (токены),
+// каждый токен ищется в заголовке/сниппете документа регистронезависимо.
+// Документы ранжируются по числу совпавших токенов — больше совпадений выше.
+// Пустой запрос возвращает все документы. Возвращает не более limit результатов.
 func Search(query string, limit int) SearchResult {
 	if limit <= 0 {
 		limit = 5
 	}
-	q := strings.ToLower(strings.TrimSpace(query))
+	tokens := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
 	res := SearchResult{Query: query}
+
+	type hit struct {
+		doc   Doc
+		score int
+	}
+	var hits []hit
 	for _, d := range corpus {
-		if q != "" && !strings.Contains(strings.ToLower(d.Title+" "+d.Snippet), q) {
+		hay := strings.ToLower(d.Title + " " + d.Snippet)
+		if len(tokens) == 0 {
+			hits = append(hits, hit{doc: d})
 			continue
 		}
-		res.Docs = append(res.Docs, d)
-		if len(res.Docs) >= limit {
-			break
+		score := 0
+		for _, tok := range tokens {
+			if strings.Contains(hay, tok) {
+				score++
+			}
 		}
+		if score > 0 {
+			hits = append(hits, hit{doc: d, score: score})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	for _, h := range hits {
+		res.Docs = append(res.Docs, h.doc)
 	}
 	res.Total = len(res.Docs)
 	return res

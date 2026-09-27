@@ -45,6 +45,30 @@ func TestSearchLimit(t *testing.T) {
 	}
 }
 
+// TestSearchMultiToken: многословный запрос работает — ищется по словам,
+// а не целой строкой (регрессия: «golang зачем нужен» должно находить doc-007).
+func TestSearchMultiToken(t *testing.T) {
+	res := Search("golang зачем нужен", 5)
+	if res.Total == 0 {
+		t.Fatalf("многословный запрос ничего не нашёл: %+v", res)
+	}
+	if !strings.Contains(strings.ToLower(res.Docs[0].Title), "golang") {
+		t.Fatalf("лучший результат не про golang: %+v", res.Docs[0])
+	}
+}
+
+// TestSearchRanking: документ с большим числом совпавших токенов выше.
+func TestSearchRanking(t *testing.T) {
+	res := Search("mcp пайплайн", 5)
+	if res.Total < 2 {
+		t.Fatalf("ожидали несколько результатов: %d", res.Total)
+	}
+	// doc-004 содержит оба слова («пайплайн» и «mcp»), остальные — одно.
+	if !strings.Contains(strings.ToLower(res.Docs[0].Title), "композиция") {
+		t.Fatalf("первый результат не doc-004: %+v", res.Docs[0])
+	}
+}
+
 // TestSummarizeWordLimit: сводка не превышает лимит слов и детерминирована.
 func TestSummarizeWordLimit(t *testing.T) {
 	text := "MCP открывает агентам доступ к инструментам. " +

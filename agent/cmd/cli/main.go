@@ -1247,21 +1247,27 @@ func execPipeline(ctx stdctx.Context, c *mcpx.Client, query string) (string, err
 	return b.String(), nil
 }
 
-// slugify приводит строку к безопасному имени файла (латиница + цифры + "-").
+// slugify приводит строку к безопасному имени файла: латиница и цифры
+// сохраняются, любые разделители схлопываются в один дефис.
 func slugify(s string) string {
 	var b strings.Builder
+	dash := false
 	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			b.WriteRune(r)
-		case r == ' ':
-			b.WriteRune('-')
+			dash = false
+		default:
+			if !dash {
+				b.WriteRune('-')
+				dash = true
+			}
 		}
 	}
-	if b.Len() == 0 {
-		return "result"
+	if name := strings.Trim(b.String(), "-"); name != "" {
+		return name
 	}
-	return b.String()
+	return "result"
 }
 
 // runMCPPipeline подключается к MCP-серверу и прогоняет пайплайн по запросу.
