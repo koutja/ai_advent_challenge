@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +111,72 @@ func TestCallTool(t *testing.T) {
 		t.Errorf("ожидали ошибку для несуществующей задачи T-999")
 	} else if !strings.Contains(err.Error(), "T-999") {
 		t.Errorf("ошибка не содержит id задачи: %v", err)
+	}
+}
+
+// TestSchedulerTools проверяет планировщик через MCP: напоминание срабатывает
+// по расписанию, периодический сбор собирает точки, get_summary возвращает
+// агрегированную сводку. Хранилище — во временном файле (MCP_DATA_FILE).
+func TestSchedulerTools(t *testing.T) {
+	t.Setenv("MCP_HELPER", "1")
+	t.Setenv("MCP_DATA_FILE", filepath.Join(t.TempDir(), "mcp_data.json"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	c, err := Connect(ctx, os.Args[0], "-test.run=TestHelperServer")
+	if err != nil {
+		t.Fatalf("Connect (MCP-соединение): %v", err)
+	}
+	defer c.Close()
+
+	// Напоминание на ближайший тик.
+	rem, err := c.CallTool(ctx, "reminder_add", map[string]any{"text": "Пора в спортзал", "in_minutes": 0})
+	if err != nil {
+		t.Fatalf("reminder_add: %v", err)
+	}
+	if !strings.Contains(rem, "R-") || !strings.Contains(rem, "Пора в спортзал") {
+		t.Fatalf("reminder_add: неожиданный ответ: %s", rem)
+	}
+
+	// Периодический сбор: 3 точки с интервалом 1 с.
+	if _, err := c.CallTool(ctx, "collect_start", map[string]any{"metric": "cpu", "interval_seconds": 1, "iterations": 3}); err != nil {
+		t.Fatalf("collect_start: %v", err)
+	}
+
+	// Ждём, пока тикер отработает несколько интервалов.
+	time.Sleep(3500 * time.Millisecond)
+
+	sum, err := c.CallTool(ctx, "get_summary", nil)
+	if err != nil {
+		t.Fatalf("get_summary: %v", err)
+	}
+	var sv getSummaryOutput
+	if err := json.Unmarshal([]byte(sum), &sv); err != nil {
+		t.Fatalf("get_summary не JSON: %v (%s)", err, sum)
+	}
+	if sv.Reminders.Fired < 1 {
+		t.Errorf("напоминание не сработало: %+v", sv.Reminders)
+	}
+	m, ok := sv.Metrics["cpu"]
+	if !ok || m.Count < 2 {
+		t.Errorf("сбор данных не отработал: %+v", sv.Metrics)
+	}
+	if m.Count > 3 || m.Done > 3 {
+		t.Errorf("iterations=3 не соблюдено: %+v", m)
+	}
+
+	// collect_status: агрегат по метрике.
+	cs, err := c.CallTool(ctx, "collect_status", map[string]any{"metric": "cpu"})
+	if err != nil {
+		t.Fatalf("collect_status: %v", err)
+	}
+	var cv map[string]metricView
+	if err := json.Unmarshal([]byte(cs), &cv); err != nil {
+		t.Fatalf("collect_status не JSON: %v (%s)", err, cs)
+	}
+	v, ok := cv["cpu"]
+	if !ok || v.Count != m.Count {
+		t.Errorf("collect_status disagrees: %+v vs %+v", cv, m)
 	}
 }

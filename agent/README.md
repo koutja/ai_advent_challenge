@@ -74,10 +74,44 @@ make reset-history                   # удалить agent_history.db (сбро
 | `create_task`   | `title` (обязательно), `priority?` (low\|medium\|high), `assignee?`      | созданная задача (JSON) |
 | `get_time`      | —                                                                        | текущее время (RFC3339) |
 | `echo`          | `message`                                                                | то же сообщение |
+| `reminder_add`  | `text` (обязательно), `in_minutes` (0 — сразу)                           | `{id, due_at}` |
+| `reminders_status` | —                                                                    | сводка total/pending/fired |
+| `collect_start` | `metric`, `interval_seconds`, `iterations` (0 — бесконечно)              | `{job_id, next_run_at}` |
+| `collect_status` | `metric?`                                                               | агрегат count/min/max/avg/latest |
+| `summary_start` | `interval_seconds`                                                       | `{job_id}` периодических снимков |
+| `get_summary`   | —                                                                        | общая сводка + число снимков |
 
 Описание входных параметров попадает в JSON-схему инструмента автоматически
 (из типов-структур и `jsonschema`-тегов), т.е. регистрация инструмента +
 описание параметров + возврат структурированного результата реализованы.
+
+### Планировщик и фоновые задачи
+
+Инструменты `reminder_add`/`reminders_status` (отложенные напоминания),
+`collect_start`/`collect_status` (периодический сбор данных) и
+`summary_start`/`get_summary` (регулярная сводка) реализуют планировщик:
+
+- **Расписание:** внутри процесса `mcp-server` крутится лёгкий тикер (1 с);
+  первое срабатывание задачи — сразу, дальше через `interval_seconds`.
+- **Хранение:** JSON-файл с атомарной записью (tmp+rename). Путь — из env
+  `MCP_DATA_FILE`, по умолчанию `results/mcp_scheduler_data.json`
+  (папка `results/` игнорируется git). Напоминания, точки данных и снимки
+  сводки переживают рестарты.
+- **24/7:** при старте сервер «догоняет» просроченные задачи (catch-up), а
+  лимит `maxPerTick` защищает от долгого навёрстывания после простоя.
+- **Агрегация:** `collect_status` и `get_summary` возвращают
+  count/min/max/avg/latest.
+
+Демо «агент работает по расписанию» (~5 с): ставит напоминание, запускает
+периодический сбор данных и печатает агрегированную сводку.
+
+    make run-mcp-demo
+
+Или вручную:
+
+    go run ./cmd/cli --mcp-call reminder_add --mcp-args '{"text":"Собрать стенд","in_minutes":0}'
+    go run ./cmd/cli --mcp-call collect_start --mcp-args '{"metric":"cpu","interval_seconds":1,"iterations":3}'
+    go run ./cmd/cli --mcp-call get_summary
 
 ### Вызов инструмента
 
@@ -108,11 +142,17 @@ make run-mcp-call TOOL=create_task ARGS='{"title":"Отчёт","priority":"high"
 Пример вывода `make run-mcp-tools`:
 
 ```
-MCP-соединение установлено (сервер: bin/mcp-server). Инструментов: 4
-  • create_task  Создаёт задачу в mock API и возвращает её полную запись.
-  • echo         Возвращает переданное сообщение без изменений.
-  • get_task     Возвращает задачу из mock API по её id.
-  • get_time     Возвращает текущее время сервера в формате RFC3339.
+MCP-соединение установлено (сервер: bin/mcp-server). Инструментов: 10
+  • collect_start   Запускает периодический сбор точек данных метрики…
+  • collect_status  Агрегат по точкам данных: count/min/max/avg/latest…
+  • create_task     Создаёт задачу в mock API и возвращает её полную запись.
+  • echo            Возвращает переданное сообщение без изменений.
+  • get_summary     Возвращает агрегированную сводку…
+  • get_task        Возвращает задачу из mock API по её id.
+  • get_time        Возвращает текущее время сервера в формате RFC3339.
+  • reminder_add    Ставит отложенное напоминание…
+  • reminders_status Агрегированная сводка по напоминаниям…
+  • summary_start   Запускает периодические снимки сводки…
 ```
 
 ### В web-интерфейсе
@@ -126,6 +166,9 @@ MCP-соединение установлено (сервер: bin/mcp-server). 
 /mcp-tools
 /mcp-call create_task {"title":"Написать отчёт","priority":"high"}
 /mcp-call get_task {"task_id":"T-001"}
+/mcp-call reminder_add {"text":"Проверить релиз","in_minutes":0}
+/mcp-call collect_start {"metric":"cpu","interval_seconds":1,"iterations":3}
+/mcp-call get_summary
 ```
 
 Результат инструмента появится в ленте чата как сообщение ассистента.
@@ -138,6 +181,8 @@ MCP-соединение установлено (сервер: bin/mcp-server). 
 `create_task`/`get_task`, проверяя возвращённый результат (`TestCallTool`) —
 это покрывает требования «соединение устанавливается», «список инструментов
 корректно возвращается» и «агент вызывает инструмент и получает результат».
+Планировщик покрыт `TestSchedulerTools` и unit-тестами (`store.go`,
+`scheduler.go`): персистентность, catch-up, агрегация, лимит догона.
 
 Веб-интерфейс ([`web/index.html`](web/index.html)) показывает селектор стратегии
 (`window | facts | branch`, переключение через `POST /strategy`). Прямо в ленте

@@ -42,6 +42,7 @@ func main() {
 	mcpTools := flag.Bool("mcp-tools", false, "подключиться к MCP-серверу (bin/mcp-server) и вывести список инструментов")
 	mcpCall := flag.String("mcp-call", "", "вызвать MCP-инструмент по имени (например get_task)")
 	mcpArgs := flag.String("mcp-args", "", "JSON-аргументы инструмента для --mcp-call (опционально)")
+	mcpDemo := flag.Bool("mcp-demo", false, "демо планировщика: напоминание + периодический сбор данных + сводка")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -55,6 +56,10 @@ func main() {
 	}
 	if *mcpCall != "" {
 		runMCPCall(cfg, *mcpCall, *mcpArgs)
+		return
+	}
+	if *mcpDemo {
+		runMCPDemo(cfg)
 		return
 	}
 
@@ -1105,6 +1110,55 @@ func runMCPCall(cfg *agent.Config, name, argsJSON string) {
 		die(err)
 	}
 	fmt.Println(out)
+}
+
+// runMCPDemo показывает планировщик в действии: ставит напоминание, запускает
+// периодический сбор данных, ждёт несколько тактов тикера и печатает
+// агрегированную сводку. Все действия — через MCP-инструменты (CallTool).
+func runMCPDemo(cfg *agent.Config) {
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 30*time.Second)
+	defer cancel()
+
+	c, err := mcpx.Connect(ctx, cfg.MCPCommand, cfg.MCPArgs...)
+	if err != nil {
+		die(fmt.Errorf("MCP-соединение: %w", err))
+	}
+	defer c.Close()
+
+	fmt.Println("== Планировщик: демо ==")
+
+	out, err := c.CallTool(ctx, "reminder_add", map[string]any{"text": "Собрать стенд перед встречей", "in_minutes": 0})
+	if err != nil {
+		die(fmt.Errorf("reminder_add: %w", err))
+	}
+	fmt.Println("reminder_add  ->", out)
+
+	out, err = c.CallTool(ctx, "collect_start", map[string]any{"metric": "cpu", "interval_seconds": 1, "iterations": 3})
+	if err != nil {
+		die(fmt.Errorf("collect_start: %w", err))
+	}
+	fmt.Println("collect_start ->", out)
+
+	fmt.Println("Жду 4 с, пока тикер соберёт точки и сработает напоминание...")
+	time.Sleep(4 * time.Second)
+
+	out, err = c.CallTool(ctx, "reminders_status", nil)
+	if err != nil {
+		die(fmt.Errorf("reminders_status: %w", err))
+	}
+	fmt.Println("reminders_status ->", out)
+
+	out, err = c.CallTool(ctx, "collect_status", nil)
+	if err != nil {
+		die(fmt.Errorf("collect_status: %w", err))
+	}
+	fmt.Println("collect_status  ->", out)
+
+	out, err = c.CallTool(ctx, "get_summary", nil)
+	if err != nil {
+		die(fmt.Errorf("get_summary: %w", err))
+	}
+	fmt.Println("get_summary      ->", out)
 }
 
 // runMCPTools подключается к локальному MCP-серверу (отдельный процесс

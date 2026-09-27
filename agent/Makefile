@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -40,6 +40,10 @@ run-mcp-tools:
 #   make run-mcp-call TOOL=create_task ARGS='{"title":"Отчёт","priority":"high"}'
 run-mcp-call:
 	go run ./cmd/cli --mcp-call $(TOOL) --mcp-args '$(ARGS)'
+
+# ===== MCP: демо планировщика (напоминание + периодический сбор + сводка) =====
+run-mcp-demo:
+	go run ./cmd/cli --mcp-demo
 
 # ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
 build-mcp-server:
