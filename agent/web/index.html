@@ -4,109 +4,185 @@
   <meta charset="utf-8">
   <title>Агент</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script>
+    // Тема устанавливается до первого рендера, чтобы не было «вспышки» другой темы.
+    // По умолчанию — тёмная; выбор пользователя хранится в localStorage.
+    (function () {
+      try {
+        var t = localStorage.getItem('agent-theme');
+        document.documentElement.dataset.theme = (t === 'light' || t === 'dark') ? t : 'dark';
+      } catch (e) {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    })();
+  </script>
   <style>
+    /* ===== Темы =====
+       Тёмная — по умолчанию (устанавливается также в <head> до рендера).
+       Светлая включается атрибутом data-theme="light" на <html> кнопкой в тулбаре.
+       Выбор сохраняется в localStorage (ключ agent-theme). */
+    :root {
+      color-scheme: dark;
+      --bg: #0d1117;
+      --bg-elev: #161b22;
+      --bg-inset: #12171f;
+      --bg-hover: #253247;
+      --border: #30363d;
+      --border-soft: #30363d;
+      --text: #e6edf3;
+      --text-strong: #c9d1d9;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-bg: #1f6feb;
+      --accent-soft: #1c2430;
+      --accent-soft-hover: #253247;
+      --accent-border: #1f3a5f;
+      --warn: #d29922;
+      --warn-bg: #2b2313;
+      --danger: #e5484d;
+      --danger-text: #ffa198;
+      --danger-bg: #3d1518;
+      --purple: #8957e5;
+      --purple-soft: #2a2336;
+      --input-bg: #0d1117;
+      --code-bg: #21262d;
+      --overlay: rgba(13, 17, 23, .6);
+      --shadow: rgba(0, 0, 0, .4);
+      --spinner-track: #30363d;
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #f5f6f8;
+      --bg-elev: #fff;
+      --bg-inset: #fafbfc;
+      --bg-hover: #dfe9ff;
+      --border: #e3e6ea;
+      --border-soft: #eef0f3;
+      --text: #222;
+      --text-strong: #333;
+      --text-muted: #666;
+      --accent: #1a73e8;
+      --accent-bg: #1a73e8;
+      --accent-soft: #eef4ff;
+      --accent-soft-hover: #dfe9ff;
+      --accent-border: #cfe0ff;
+      --warn: #b45309;
+      --warn-bg: #fff8ef;
+      --danger: #d64545;
+      --danger-text: #b42318;
+      --danger-bg: #fdecec;
+      --purple: #7a5cd6;
+      --purple-soft: #f6f2ff;
+      --input-bg: #fff;
+      --code-bg: #e8ecf3;
+      --overlay: rgba(255, 255, 255, .55);
+      --shadow: rgba(0, 0, 0, .08);
+      --spinner-track: #d0d5dd;
+    }
     * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
-    header { padding: 1rem 1.5rem; background: #fff; border-bottom: 1px solid #e3e6ea; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+    header { padding: 1rem 1.5rem; background: var(--bg-elev); border-bottom: 1px solid var(--border); }
     header h1 { margin: 0; font-size: 1.25rem; }
-    .toolbar { display: flex; gap: .6rem; align-items: center; padding: .6rem 1.5rem; background: #fff; border-bottom: 1px solid #e3e6ea; flex-wrap: wrap; }
-    .toolbar label { font-size: .85rem; color: #555; }
-    select { padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
-    .status { font-size: .85rem; color: #666; }
+    .toolbar { display: flex; gap: .6rem; align-items: center; padding: .6rem 1.5rem; background: var(--bg-elev); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .toolbar label { font-size: .85rem; color: var(--text-muted); }
+    select { padding: .4rem .5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); }
+    .status { font-size: .85rem; color: var(--text-muted); }
     .layout { display: flex; gap: 1rem; padding: 1rem 1.5rem; align-items: flex-start; }
     #chat { flex: 1 1 72%; min-width: 0; }
-    #log { border: 1px solid #e3e6ea; border-radius: 10px; padding: .8rem; height: 66vh; overflow-y: auto; background: #fff; }
+    #log { border: 1px solid var(--border); border-radius: 10px; padding: .8rem; height: 66vh; overflow-y: auto; background: var(--bg-elev); }
     .msg { margin: .5rem 0; white-space: pre-wrap; }
-    .user { color: #1a73e8; }
-    .assistant { color: #222; }
-    .typing { color: #999; font-style: italic; margin: .4rem 0; }
-    .hint { font-size: .78rem; color: #999; margin: .4rem 0; }
+    .user { color: var(--accent); }
+    .assistant { color: var(--text); }
+    .typing { color: var(--text-muted); font-style: italic; margin: .4rem 0; }
+    .hint { font-size: .78rem; color: var(--text-muted); margin: .4rem 0; }
     /* Лог стратегии в ленте чата */
-    .strat-event { margin: .15rem 0 .15rem 1.2rem; padding: .1rem .4rem; font-size: .78rem; color: #6b7280; background: #f6f8fb; border-left: 3px solid #dbe2ee; border-radius: 0 6px 6px 0; white-space: pre-wrap; animation: fadeIn .2s ease; }
-    .strat-event.warn { color: #b45309; border-left-color: #f59e0b; background: #fff8ef; }
-    .strat-event.predict { color: #1a73e8; font-weight: 600; border-left-color: #1a73e8; background: #f0f5ff; }
+    .strat-event { margin: .15rem 0 .15rem 1.2rem; padding: .1rem .4rem; font-size: .78rem; color: var(--text-muted); background: var(--bg-inset); border-left: 3px solid var(--border); border-radius: 0 6px 6px 0; white-space: pre-wrap; animation: fadeIn .2s ease; }
+    .strat-event.warn { color: var(--warn); border-left-color: var(--warn); background: var(--warn-bg); }
+    .strat-event.predict { color: var(--accent); font-weight: 600; border-left-color: var(--accent); background: var(--accent-soft); }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
     form { display: flex; gap: .5rem; margin-top: .8rem; }
-    input { flex: 1; padding: .5rem; border: 1px solid #ccc; border-radius: 6px; }
-    button { padding: .5rem 1.1rem; border: 0; border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
+    input { flex: 1; padding: .5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); }
+    button { padding: .5rem 1.1rem; border: 0; border-radius: 6px; background: var(--accent-bg); color: #fff; cursor: pointer; }
     .side { flex: 0 0 340px; display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
-    #stats, #mem { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 1rem; }
+    #stats, #mem { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
     #stats h2, #mem h2 { margin: 0 0 .8rem; font-size: 1rem; }
-    .mem-note { font-size: .8rem; color: #666; margin: 0 0 .8rem; }
-    .layer { border: 1px solid #eef0f3; border-radius: 8px; margin-bottom: .6rem; overflow: hidden; }
+    .mem-note { font-size: .8rem; color: var(--text-muted); margin: 0 0 .8rem; }
+    .layer { border: 1px solid var(--border-soft); border-radius: 8px; margin-bottom: .6rem; overflow: hidden; }
     .layer-head { padding: .35rem .6rem; font-size: .8rem; font-weight: 600; color: #fff; }
     .layer-head.short { background: #4c8bf5; }
     .layer-head.work { background: #f5a623; }
     .layer-head.long { background: #7a5cd6; }
     .layer-head.inv { background: #d64545; }
     .inv-layer { margin-top: 1rem; }
-    .inv-form { padding: .5rem .6rem; display: flex; flex-direction: column; gap: .4rem; background: #fff; border-top: 1px solid #eef0f3; }
+    .inv-form { padding: .5rem .6rem; display: flex; flex-direction: column; gap: .4rem; background: var(--bg-elev); border-top: 1px solid var(--border-soft); }
     .inv-form select, .inv-form input { width: 100%; }
-    .inv-item { margin: .25rem 0; padding: .3rem .4rem; border: 1px solid #eee; border-radius: 6px; background: #fff; }
-    .inv-item .inv-title { font-weight: 600; color: #d64545; }
-    .inv-item .inv-cat { font-size: .72rem; color: #888; }
-    .inv-item .inv-del { float: right; border: none; background: none; color: #c0392b; cursor: pointer; font-size: .85rem; }
-    .layer-body { padding: .45rem .6rem; font-size: .82rem; background: #fafbfc; }
+    .inv-item { margin: .25rem 0; padding: .3rem .4rem; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg-elev); }
+    .inv-item .inv-title { font-weight: 600; color: var(--danger); }
+    .inv-item .inv-cat { font-size: .72rem; color: var(--text-muted); }
+    .inv-item .inv-del { float: right; border: none; background: none; color: var(--danger); cursor: pointer; font-size: .85rem; }
+    .layer-body { padding: .45rem .6rem; font-size: .82rem; background: var(--bg-inset); }
     .layer-body .fact { margin: .15rem 0; white-space: pre-wrap; }
-    .layer-body .fact b { color: #333; }
-    .mem-actions { margin-top: .9rem; border-top: 1px solid #eef0f3; padding-top: .7rem; display: flex; flex-direction: column; gap: .4rem; }
+    .layer-body .fact b { color: var(--text-strong); }
+    .mem-actions { margin-top: .9rem; border-top: 1px solid var(--border-soft); padding-top: .7rem; display: flex; flex-direction: column; gap: .4rem; }
     .mem-actions h3 { margin: 0 0 .2rem; font-size: .85rem; }
     .mem-actions select, .mem-actions input { width: 100%; }
     .btn-secondary { background: #5f6368; }
     .btn-row { display: flex; gap: .4rem; flex-wrap: wrap; }
-    .btn-sm { padding: .3rem .6rem; font-size: .78rem; background: #7a5cd6; }
+    .btn-sm { padding: .3rem .6rem; font-size: .78rem; background: var(--purple); }
     .prof-block { white-space: pre-wrap; }
     /* Экран «Профили» внутри SPA */
     .prof-screen { padding: 1rem 1.5rem; max-width: 920px; }
-    .prof-screen .card { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    .prof-screen .card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
     .prof-screen .card h2 { margin: 0 0 .6rem; font-size: 1rem; }
-    .prof-screen .note { font-size: .82rem; color: #666; margin: 0 0 .7rem; }
-    .prof { white-space: pre-wrap; font-size: .88rem; background: #fafbfc; border: 1px solid #eef0f3; border-radius: 8px; padding: .7rem; }
+    .prof-screen .note { font-size: .82rem; color: var(--text-muted); margin: 0 0 .7rem; }
+    .prof { white-space: pre-wrap; font-size: .88rem; background: var(--bg-inset); border: 1px solid var(--border-soft); border-radius: 8px; padding: .7rem; }
     ul.profiles { list-style: none; margin: 0; padding: 0; }
-    ul.profiles li { display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem; border: 1px solid #eef0f3; border-radius: 8px; margin-bottom: .5rem; }
-    ul.profiles li.active { border-color: #7a5cd6; background: #f6f2ff; }
+    ul.profiles li { display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem; border: 1px solid var(--border-soft); border-radius: 8px; margin-bottom: .5rem; }
+    ul.profiles li.active { border-color: var(--purple); background: var(--purple-soft); }
     ul.profiles li .info { flex: 1; }
     ul.profiles li .info b { font-size: .92rem; }
-    ul.profiles li .info span { display: block; font-size: .8rem; color: #666; }
-    .prof-screen label { display: block; font-size: .82rem; color: #555; margin: .5rem 0 .2rem; }
-    .prof-screen input, .prof-screen textarea { width: 100%; padding: .45rem .5rem; border: 1px solid #ccc; border-radius: 6px; font: inherit; }
+    ul.profiles li .info span { display: block; font-size: .8rem; color: var(--text-muted); }
+    .prof-screen label { display: block; font-size: .82rem; color: var(--text-muted); margin: .5rem 0 .2rem; }
+    .prof-screen input, .prof-screen textarea { width: 100%; padding: .45rem .5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; background: var(--input-bg); color: var(--text); }
     .prof-screen textarea { min-height: 54px; resize: vertical; }
     .prof-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
     button.ghost { background: #5f6368; }
-    .empty { color: #999; font-size: .9rem; }
+    .empty { color: var(--text-muted); font-size: .9rem; }
     .metric { margin: .7rem 0; }
-    .metric .label { display: flex; justify-content: space-between; font-size: .85rem; color: #555; margin-bottom: .25rem; }
-    .bar { height: 8px; background: #eef0f3; border-radius: 4px; overflow: hidden; }
+    .metric .label { display: flex; justify-content: space-between; font-size: .85rem; color: var(--text-muted); margin-bottom: .25rem; }
+    .bar { height: 8px; background: var(--border-soft); border-radius: 4px; overflow: hidden; }
     .bar > span { display: block; height: 100%; width: 0; background: #4c8bf5; transition: width .3s, background .3s; }
     .ctx-ok > span { background: #2e9e44; }
     .ctx-warn > span { background: #f5a623; }
     .ctx-danger > span { background: #e5484d; }
-    .overflow { margin-top: .6rem; padding: .5rem .6rem; border-radius: 6px; background: #fdecec; color: #b42318; font-size: .85rem; font-weight: 600; }
-    .totals { margin-top: 1rem; border-top: 1px solid #eef0f3; padding-top: .6rem; font-size: .9rem; }
+    .overflow { margin-top: .6rem; padding: .5rem .6rem; border-radius: 6px; background: var(--danger-bg); color: var(--danger-text); font-size: .85rem; font-weight: 600; }
+    .totals { margin-top: 1rem; border-top: 1px solid var(--border-soft); padding-top: .6rem; font-size: .9rem; }
     .totals div { display: flex; justify-content: space-between; margin: .3rem 0; }
-    .totals .sec { font-weight: 600; border-bottom: 1px solid #eef0f3; margin-top: .5rem; }
+    .totals .sec { font-weight: 600; border-bottom: 1px solid var(--border-soft); margin-top: .5rem; }
     /* Состояние задачи: закреплённая полоска над логом чата */
     #taskBar { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .6rem; }
-    #taskBar .tb-title { font-size: .85rem; color: #555; font-weight: 600; }
-    #taskBar button { padding: .3rem .7rem; font-size: .8rem; background: #eef4ff; color: #1a73e8; border: 1px solid #cfe0ff; border-radius: 999px; cursor: pointer; }
-    #taskBar button:hover { background: #dfe9ff; }
+    #taskBar .tb-title { font-size: .85rem; color: var(--text-muted); font-weight: 600; }
+    #taskBar button { padding: .3rem .7rem; font-size: .8rem; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-border); border-radius: 999px; cursor: pointer; }
+    #taskBar button:hover { background: var(--accent-soft-hover); }
     #taskBar button:disabled { opacity: .45; cursor: not-allowed; }
-    #taskBanner { margin-bottom: .6rem; padding: .55rem .7rem; border-radius: 8px; background: #eef4ff; border: 1px solid #cfe0ff; font-size: .85rem; line-height: 1.55; }
-    #taskBanner code { background: #e8ecf3; padding: 0 .3rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
-    #taskBanner summary { display: inline-block; cursor: pointer; color: #1a73e8; margin-left: .3rem; user-select: none; }
+    #taskBanner { margin-bottom: .6rem; padding: .55rem .7rem; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent-border); font-size: .85rem; line-height: 1.55; }
+    #taskBanner code { background: var(--code-bg); padding: 0 .3rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+    #taskBanner summary { display: inline-block; cursor: pointer; color: var(--accent); margin-left: .3rem; user-select: none; }
     /* Toasts */
     #toasts { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
-    .toast { background: #fff; border: 1px solid #e3e6ea; border-left: 4px solid #1a73e8; border-radius: 8px; padding: .6rem .8rem; box-shadow: 0 4px 12px rgba(0,0,0,.08); font-size: .85rem; display: flex; gap: .6rem; align-items: flex-start; animation: toastIn .25s ease; }
+    .toast { background: var(--bg-elev); border: 1px solid var(--border); border-left: 4px solid var(--accent-bg); border-radius: 8px; padding: .6rem .8rem; box-shadow: 0 4px 12px var(--shadow); font-size: .85rem; display: flex; gap: .6rem; align-items: flex-start; animation: toastIn .25s ease; }
     .toast.error { border-left-color: #e5484d; }
     /* Оверлей «агент работает» — виден во время LLM-вызовов (план/ответ) */
-    #working { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; background: rgba(255,255,255,.55); backdrop-filter: blur(1px); }
-    #working .working-card { display: flex; flex-direction: column; align-items: center; gap: .7rem; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 1.2rem 1.6rem; box-shadow: 0 6px 20px rgba(0,0,0,.1); }
-    .spinner { width: 26px; height: 26px; border: 3px solid #d0d5dd; border-top-color: #1a73e8; border-radius: 50%; animation: spin .7s linear infinite; }
+    #working { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; background: var(--overlay); backdrop-filter: blur(1px); }
+    #working .working-card { display: flex; flex-direction: column; align-items: center; gap: .7rem; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 1.2rem 1.6rem; box-shadow: 0 6px 20px var(--shadow); }
+    .spinner { width: 26px; height: 26px; border: 3px solid var(--spinner-track); border-top-color: var(--accent-bg); border-radius: 50%; animation: spin .7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .toast.warn { border-left-color: #f5a623; }
     .toast.success { border-left-color: #2e9e44; }
-    .toast-close { cursor: pointer; color: #999; margin-left: auto; font-weight: 700; }
+    .toast-close { cursor: pointer; color: var(--text-muted); margin-left: auto; font-weight: 700; }
     @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+    #themeToggle { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    #themeToggle:hover { background: var(--accent-soft); }
   </style>
 </head>
 <body>
@@ -124,6 +200,7 @@
     <button id="navProfiles" type="button">👤 Профили</button>
     <button id="navChat" type="button" style="display:none">💬 Чат</button>
     <span style="flex:1"></span>
+    <button id="themeToggle" type="button" title="Переключить тему (тёмная — по умолчанию)">☀️ Светлая</button>
     <button id="newDialog" type="button">＋ Новый диалог</button>
   </div>
 
@@ -307,6 +384,22 @@
     const stratStatus = document.getElementById('strategyStatus');
     let typingEl = null;
     let session = { req: 0, resp: 0, cost: 0 };
+
+    // ---- Темы: тёмная по умолчанию, выбор пользователя сохраняется ----
+    const THEME_KEY = 'agent-theme';
+    const themeToggle = document.getElementById('themeToggle');
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      // Кнопка показывает тему, в которую переключимся по клику.
+      themeToggle.textContent = theme === 'dark' ? '☀️ Светлая' : '🌙 Тёмная';
+      try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* игнорируем */ }
+    }
+    themeToggle.addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+    });
+    // Синхронизируем кнопку с темой, заданной в <head> до первого рендера.
+    applyTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
 
     // ---- Toasts ----
     function showToast(message, type, duration) {
