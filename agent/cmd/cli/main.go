@@ -43,6 +43,7 @@ func main() {
 	mcpCall := flag.String("mcp-call", "", "вызвать MCP-инструмент по имени (например get_task)")
 	mcpArgs := flag.String("mcp-args", "", "JSON-аргументы инструмента для --mcp-call (опционально)")
 	mcpDemo := flag.Bool("mcp-demo", false, "демо планировщика: напоминание + периодический сбор данных + сводка")
+	mcpPipeline := flag.String("mcp-pipeline", "", "пайплайн: search → summarize → save_to_file по запросу")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -60,6 +61,10 @@ func main() {
 	}
 	if *mcpDemo {
 		runMCPDemo(cfg)
+		return
+	}
+	if *mcpPipeline != "" {
+		runMCPPipeline(cfg, *mcpPipeline)
 		return
 	}
 
@@ -201,6 +206,28 @@ func main() {
 				continue
 			}
 			fmt.Println(out)
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/mcp-pipeline"):
+			query := strings.TrimSpace(strings.TrimPrefix(line, "/mcp-pipeline"))
+			if query == "" {
+				fmt.Println("использование: /mcp-pipeline <запрос>")
+				fmt.Print("> ")
+				continue
+			}
+			c, err := replConnect(cfg)
+			if err != nil {
+				fmt.Println("ошибка:", err)
+				fmt.Print("> ")
+				continue
+			}
+			out, err := execPipeline(stdctx.Background(), c, query)
+			if err != nil {
+				fmt.Println("ошибка:", err)
+			} else {
+				fmt.Println("== Пайплайн: search → summarize → save_to_file ==")
+				fmt.Print(out)
+			}
 			fmt.Print("> ")
 			continue
 		case strings.HasPrefix(line, "/checkpoint"):
@@ -1159,6 +1186,101 @@ func runMCPDemo(cfg *agent.Config) {
 		die(fmt.Errorf("get_summary: %w", err))
 	}
 	fmt.Println("get_summary      ->", out)
+}
+
+// execPipeline выполняет цепочку MCP-инструментов:
+//
+//  1. search      — найти документы;
+//  2. summarize   — построить сводку по содержимому найденного (передаём
+//     результат шага 1 как вход шага 2);
+//  3. save_to_file— сохранить сводку в файл (вход шага 3 — вывод шага 2).
+//
+// Данные между инструментами передаются через CallTool (JSON в JSON).
+func execPipeline(ctx stdctx.Context, c *mcpx.Client, query string) (string, error) {
+	var b strings.Builder
+
+	// Шаг 1: search
+	sr, err := c.CallTool(ctx, "search", map[string]any{"query": query, "limit": 3})
+	if err != nil {
+		return "", fmt.Errorf("search: %w", err)
+	}
+	var searchRes mcpx.SearchResult
+	if err := json.Unmarshal([]byte(sr), &searchRes); err != nil {
+		return "", fmt.Errorf("разбор результата search: %w", err)
+	}
+	if len(searchRes.Docs) == 0 {
+		return "", fmt.Errorf("по запросу %q ничего не найдено", query)
+	}
+	fmt.Fprintf(&b, "1) search(%q): %d документов\n", query, searchRes.Total)
+	for _, d := range searchRes.Docs {
+		fmt.Fprintf(&b, "   • [%s] %s — %s\n", d.ID, d.Title, d.Snippet)
+	}
+
+	// Шаг 2: summarize — на вход подаётся контент из шага 1.
+	var parts []string
+	for _, d := range searchRes.Docs {
+		parts = append(parts, d.Title+". "+d.Snippet)
+	}
+	su, err := c.CallTool(ctx, "summarize", map[string]any{"text": strings.Join(parts, "\n\n"), "max_words": 40})
+	if err != nil {
+		return "", fmt.Errorf("summarize: %w", err)
+	}
+	var sumRes mcpx.SummarizeResult
+	if err := json.Unmarshal([]byte(su), &sumRes); err != nil {
+		return "", fmt.Errorf("разбор результата summarize: %w", err)
+	}
+	fmt.Fprintf(&b, "2) summarize: %d слов, %d источников\n", sumRes.Words, sumRes.Sources)
+	fmt.Fprintf(&b, "   %s\n", sumRes.Summary)
+
+	// Шаг 3: save_to_file — на вход подаётся сводка из шага 2.
+	fname := "pipeline_" + slugify(query) + ".md"
+	sf, err := c.CallTool(ctx, "save_to_file", map[string]any{"filename": fname, "content": sumRes.Summary + "\n"})
+	if err != nil {
+		return "", fmt.Errorf("save_to_file: %w", err)
+	}
+	var saveRes mcpx.SaveFileResult
+	if err := json.Unmarshal([]byte(sf), &saveRes); err != nil {
+		return "", fmt.Errorf("разбор результата save_to_file: %w", err)
+	}
+	fmt.Fprintf(&b, "3) save_to_file: %s (%d байт)\n", saveRes.Path, saveRes.Bytes)
+
+	return b.String(), nil
+}
+
+// slugify приводит строку к безопасному имени файла (латиница + цифры + "-").
+func slugify(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteRune('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "result"
+	}
+	return b.String()
+}
+
+// runMCPPipeline подключается к MCP-серверу и прогоняет пайплайн по запросу.
+func runMCPPipeline(cfg *agent.Config, query string) {
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 30*time.Second)
+	defer cancel()
+
+	c, err := mcpx.Connect(ctx, cfg.MCPCommand, cfg.MCPArgs...)
+	if err != nil {
+		die(fmt.Errorf("MCP-соединение: %w", err))
+	}
+	defer c.Close()
+
+	out, err := execPipeline(ctx, c, query)
+	if err != nil {
+		die(err)
+	}
+	fmt.Println("== Пайплайн: search → summarize → save_to_file ==")
+	fmt.Print(out)
 }
 
 // runMCPTools подключается к локальному MCP-серверу (отдельный процесс

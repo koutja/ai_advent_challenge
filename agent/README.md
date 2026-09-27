@@ -80,6 +80,9 @@ make reset-history                   # удалить agent_history.db (сбро
 | `collect_status` | `metric?`                                                               | агрегат count/min/max/avg/latest |
 | `summary_start` | `interval_seconds`                                                       | `{job_id}` периодических снимков |
 | `get_summary`   | —                                                                        | общая сводка + число снимков |
+| `search`        | `query` (обязательно), `limit?`                                          | `{query, total, docs[]}` |
+| `summarize`     | `text`, `max_words?`                                                     | `{summary, words, sources}` |
+| `save_to_file`  | `filename`, `content`                                                    | `{path, bytes}` → `results/pipeline/` |
 
 Описание входных параметров попадает в JSON-схему инструмента автоматически
 (из типов-структур и `jsonschema`-тегов), т.е. регистрация инструмента +
@@ -113,6 +116,36 @@ make reset-history                   # удалить agent_history.db (сбро
     go run ./cmd/cli --mcp-call collect_start --mcp-args '{"metric":"cpu","interval_seconds":1,"iterations":3}'
     go run ./cmd/cli --mcp-call get_summary
 
+### Композиция инструментов
+
+Три инструмента `search`, `summarize` и `save_to_file` образуют пайплайн, где
+вывод каждого шага передаётся на вход следующего:
+
+1. `search <query>` — находит документы в локальном корпусе (детерминированно);
+2. `summarize <text>` — строит сводку (первые предложения до `max_words`);
+3. `save_to_file <filename, content>` — сохраняет результат в `results/pipeline/`
+   (env `MCP_OUTPUT_DIR`), имя файла санитизируется от путей.
+
+Автоматическое выполнение цепочки — флагом `--mcp-pipeline` или REPL-командой
+`/mcp-pipeline <запрос>`:
+
+    make run-mcp-pipeline QUERY=mcp
+    # или вручную:
+    go run ./cmd/cli --mcp-pipeline mcp
+
+Пример вывода (каждый шаг виден, данные перетекают между инструментами):
+
+    1) search("mcp"): 3 документов
+       • [doc-001] Что такое MCP — Model Context Protocol — открытый стандарт…
+       • [doc-002] Go SDK для MCP — Официальный Go SDK позволяет писать…
+       • [doc-003] Планировщик в агенте — Планировщик выполняет…
+    2) summarize: 30 слов, 3 источников
+       Что такое MCP. Model Context Protocol — открытый стандарт для подключения…
+    3) save_to_file: results/pipeline/pipeline_mcp.md (130 байт)
+
+Проверка цепочки автоматизирована в `TestPipelineComposition`: сводка строится
+по найденным документам, а сохранённый файл в точности равен сводке.
+
 ### Вызов инструмента
 
 Вызвать инструмент и получить результат можно флагом `--mcp-call` (без REPL и
@@ -142,17 +175,20 @@ make run-mcp-call TOOL=create_task ARGS='{"title":"Отчёт","priority":"high"
 Пример вывода `make run-mcp-tools`:
 
 ```
-MCP-соединение установлено (сервер: bin/mcp-server). Инструментов: 10
-  • collect_start   Запускает периодический сбор точек данных метрики…
-  • collect_status  Агрегат по точкам данных: count/min/max/avg/latest…
-  • create_task     Создаёт задачу в mock API и возвращает её полную запись.
-  • echo            Возвращает переданное сообщение без изменений.
-  • get_summary     Возвращает агрегированную сводку…
-  • get_task        Возвращает задачу из mock API по её id.
-  • get_time        Возвращает текущее время сервера в формате RFC3339.
-  • reminder_add    Ставит отложенное напоминание…
+MCP-соединение установлено (сервер: bin/mcp-server). Инструментов: 13
+  • collect_start    Запускает периодический сбор точек данных метрики…
+  • collect_status   Агрегат по точкам данных: count/min/max/avg/latest…
+  • create_task      Создаёт задачу в mock API и возвращает её полную запись.
+  • echo             Возвращает переданное сообщение без изменений.
+  • get_summary      Возвращает агрегированную сводку…
+  • get_task         Возвращает задачу из mock API по её id.
+  • get_time         Возвращает текущее время сервера в формате RFC3339.
+  • reminder_add     Ставит отложенное напоминание…
   • reminders_status Агрегированная сводка по напоминаниям…
-  • summary_start   Запускает периодические снимки сводки…
+  • save_to_file     Сохраняет контент в файл и возвращает путь.
+  • search           Ищет документы в локальном корпусе…
+  • summarize        Строит детерминированную сводку текста…
+  • summary_start    Запускает периодические снимки сводки…
 ```
 
 ### В web-интерфейсе
@@ -169,6 +205,9 @@ MCP-соединение установлено (сервер: bin/mcp-server). 
 /mcp-call reminder_add {"text":"Проверить релиз","in_minutes":0}
 /mcp-call collect_start {"metric":"cpu","interval_seconds":1,"iterations":3}
 /mcp-call get_summary
+/mcp-call search {"query":"mcp","limit":2}
+/mcp-call summarize {"text":"Что такое MCP. Model Context Protocol…","max_words":20}
+/mcp-call save_to_file {"filename":"note.md","content":"Краткая сводка по MCP"}
 ```
 
 Результат инструмента появится в ленте чата как сообщение ассистента.
@@ -213,6 +252,7 @@ CLI-сравнение стратегий (`--compare-strategies`) оставл�
 | `/compress` | переключить legacy-сжатие |
 | `/mcp-tools` | показать список MCP-инструментов |
 | `/mcp-call <имя> <json>` | вызвать MCP-инструмент и напечатать результат |
+| `/mcp-pipeline <запрос>` | пайплайн search → summarize → save_to_file |
 | `/invariants` | показать активные инварианты |
 | `/invariant add <cat>|<title>|<text>` | добавить правило (архитектура\|техническое решение\|стек\|бизнес-правило) |
 | `/invariant rm <id>` `/invariant show <id>` | удалить / показать инвариант |

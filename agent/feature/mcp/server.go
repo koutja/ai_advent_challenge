@@ -104,6 +104,32 @@ func newServerWith(api *mockAPI, st *Store, sch *Scheduler) *mcp.Server {
 		return nil, t, nil
 	})
 
+	// --- Композиция: search → summarize → save_to_file ---
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "search",
+		Description: "Ищет документы в локальном корпусе и возвращает id/title/snippet.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, SearchResult, error) {
+		return nil, Search(in.Query, in.Limit), nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "summarize",
+		Description: "Строит детерминированную сводку текста (первые предложения до лимита слов).",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in summarizeInput) (*mcp.CallToolResult, SummarizeResult, error) {
+		return nil, Summarize(in.Text, in.MaxWords), nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "save_to_file",
+		Description: "Сохраняет контент в файл (папка MCP_OUTPUT_DIR или results/pipeline) и возвращает путь.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in saveToFileInput) (*mcp.CallToolResult, SaveFileResult, error) {
+		res, err := SaveFile(in.Filename, in.Content)
+		if err != nil {
+			return nil, SaveFileResult{}, err
+		}
+		return nil, res, nil
+	})
+
 	// --- Планировщик: напоминания ---
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "reminder_add",
@@ -233,6 +259,27 @@ type createTaskInput struct {
 	Priority string `json:"priority,omitempty" jsonschema:"приоритет: low|medium|high (по умолчанию medium)"`
 	// Assignee — исполнитель задачи (необязательно).
 	Assignee string `json:"assignee,omitempty" jsonschema:"исполнитель задачи (необязательно)"`
+}
+
+type searchInput struct {
+	// Query — поисковый запрос (обязательно).
+	Query string `json:"query" jsonschema:"поисковый запрос (обязательное поле)"`
+	// Limit — максимум результатов (по умолчанию 5).
+	Limit int `json:"limit,omitempty" jsonschema:"максимум результатов; по умолчанию 5"`
+}
+
+type summarizeInput struct {
+	// Text — текст для сводки.
+	Text string `json:"text" jsonschema:"текст, из которого строится сводка"`
+	// MaxWords — лимит слов сводки (по умолчанию 40).
+	MaxWords int `json:"max_words,omitempty" jsonschema:"лимит слов сводки; по умолчанию 40"`
+}
+
+type saveToFileInput struct {
+	// Filename — имя файла без путей (пишется в results/pipeline).
+	Filename string `json:"filename" jsonschema:"имя файла без путей (пишется в results/pipeline)"`
+	// Content — содержимое файла.
+	Content string `json:"content" jsonschema:"содержимое файла"`
 }
 
 type reminderAddInput struct {

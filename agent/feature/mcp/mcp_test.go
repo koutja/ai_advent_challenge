@@ -180,3 +180,75 @@ func TestSchedulerTools(t *testing.T) {
 		t.Errorf("collect_status disagrees: %+v vs %+v", cv, m)
 	}
 }
+
+// TestPipelineComposition проверяет автоматическую цепочку MCP-инструментов:
+// search → summarize → save_to_file. Корректность передачи данных: сводка
+// строится по найденным документам (шаг 2 потребляет вывод шага 1), а файл
+// содержит сводку (шаг 3 потребляет вывод шага 2).
+func TestPipelineComposition(t *testing.T) {
+	t.Setenv("MCP_HELPER", "1")
+	outDir := t.TempDir()
+	t.Setenv("MCP_OUTPUT_DIR", outDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	c, err := Connect(ctx, os.Args[0], "-test.run=TestHelperServer")
+	if err != nil {
+		t.Fatalf("Connect (MCP-соединение): %v", err)
+	}
+	defer c.Close()
+
+	// Шаг 1: search — получает данные.
+	sr, err := c.CallTool(ctx, "search", map[string]any{"query": "mcp", "limit": 3})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	var searchRes SearchResult
+	if err := json.Unmarshal([]byte(sr), &searchRes); err != nil {
+		t.Fatalf("search не JSON: %v (%s)", err, sr)
+	}
+	if len(searchRes.Docs) == 0 {
+		t.Fatalf("search вернул пустой список")
+	}
+
+	// Шаг 2: summarize — на вход подаём контент из шага 1.
+	var parts []string
+	for _, d := range searchRes.Docs {
+		parts = append(parts, d.Title+". "+d.Snippet)
+	}
+	su, err := c.CallTool(ctx, "summarize", map[string]any{"text": strings.Join(parts, "\n\n"), "max_words": 40})
+	if err != nil {
+		t.Fatalf("summarize: %v", err)
+	}
+	var sumRes SummarizeResult
+	if err := json.Unmarshal([]byte(su), &sumRes); err != nil {
+		t.Fatalf("summarize не JSON: %v (%s)", err, su)
+	}
+	if sumRes.Summary == "" || !strings.Contains(strings.ToLower(sumRes.Summary), "mcp") {
+		t.Fatalf("сводка не содержит данных из шага 1: %+v", sumRes)
+	}
+	if sumRes.Sources != len(searchRes.Docs) {
+		t.Fatalf("sources=%d, ожидали %d документов", sumRes.Sources, len(searchRes.Docs))
+	}
+
+	// Шаг 3: save_to_file — сохраняем сводку из шага 2.
+	sf, err := c.CallTool(ctx, "save_to_file", map[string]any{"filename": "pipeline_mcp.md", "content": sumRes.Summary})
+	if err != nil {
+		t.Fatalf("save_to_file: %v", err)
+	}
+	var saveRes SaveFileResult
+	if err := json.Unmarshal([]byte(sf), &saveRes); err != nil {
+		t.Fatalf("save_to_file не JSON: %v (%s)", err, sf)
+	}
+	if !strings.HasPrefix(filepath.Clean(saveRes.Path), filepath.Clean(outDir)) {
+		t.Fatalf("файл записан вне MCP_OUTPUT_DIR: %s", saveRes.Path)
+	}
+	data, err := os.ReadFile(saveRes.Path)
+	if err != nil {
+		t.Fatalf("чтение сохранённого файла: %v", err)
+	}
+	if string(data) != sumRes.Summary {
+		t.Fatalf("файл не содержит сводку: %q != %q", data, sumRes.Summary)
+	}
+}

@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -44,6 +44,11 @@ run-mcp-call:
 # ===== MCP: демо планировщика (напоминание + периодический сбор + сводка) =====
 run-mcp-demo:
 	go run ./cmd/cli --mcp-demo
+
+# ===== MCP: пайплайн search → summarize → save_to_file =====
+# Пример: make run-mcp-pipeline QUERY=mcp
+run-mcp-pipeline:
+	go run ./cmd/cli --mcp-pipeline "$(QUERY)"
 
 # ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
 build-mcp-server:
