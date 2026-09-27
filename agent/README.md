@@ -200,6 +200,9 @@ make run-mcp-orchestrate QUERY=mcp
 маршрутизации и порядка. Проверка: `TestRegistryRouting`,
 `TestRegistryDuplicateTools`, `TestOrchestrateFlow`.
 
+Подробное объяснение «как это работает и как пользоваться» — в
+[`docs/mcp-orchestrator.md`](docs/mcp-orchestrator.md).
+
 ### Вызов инструмента
 
 Вызвать инструмент и получить результат можно флагом `--mcp-call` (без REPL и
