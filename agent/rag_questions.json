@@ -59,6 +59,12 @@
       "question": "Куда инструмент save_to_file сохраняет файлы по умолчанию?",
       "expectation": ["results/pipeline"],
       "sources": ["agent/feature/mcp/pipeline.go"]
+    },
+    {
+      "id": "q11",
+      "question": "Откуда загружается модель эмбеддингов для индекса и о чём предупреждает библиотека, если не задан HF_TOKEN?",
+      "expectation": ["Hugging Face", "HF_TOKEN", "кэш"],
+      "sources": ["index_service/README.md"]
     }
   ]
 }
