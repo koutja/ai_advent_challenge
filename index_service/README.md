@@ -61,6 +61,35 @@
 
 Никаких системных зависимостей (Xcode CLT и т.п.) не требуется. `LLM_API_KEY` не нужен.
 
+## Откуда берётся модель эмбеддингов (Hugging Face Hub)
+
+Модель эмбеддингов `intfloat/multilingual-e5-small` — это готовая нейросеть
+(веса ~470 МБ + токенизатор), размещённая на **Hugging Face Hub**
+(`huggingface.co`) — публичном каталоге ML-моделей. Она скачивается **один раз**
+при первой загрузке в [`embedder.py`](embedder.py) (команды `make index`,
+`make serve`):
+
+```python
+SentenceTransformer("intfloat/multilingual-e5-small")  # тянет файлы с HF
+```
+
+Дальше модель **кэшируется локально** в `~/.cache/huggingface/hub/` — все
+последующие запуски работают офлайн, сетевых обращений нет.
+
+**Про warning в логах** — «You are sending unauthenticated requests to the HF
+Hub. Please set a HF_TOKEN»: библиотека видит, что не задан токен `HF_TOKEN`
+(нужен бесплатный аккаунт на huggingface.co). Для нашей разовой загрузки это
+безвредно, только чуть ниже rate-limit. Убрать/ускорить:
+
+```bash
+export HF_TOKEN=hf_...        # токен из huggingface.co/settings/tokens
+export HF_HUB_OFFLINE=1       # после первого скачивания: только локальный кэш
+```
+
+Это не имеет отношения к `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL` — те нужны
+только для генерации ответов агентом (общий пакет `llm`), а эмбеддинги считает
+локальная модель.
+
 ## Запуск
 
 ```bash
