@@ -1,0 +1,57 @@
+{
+  "docs_dir": "",
+  "embed": {
+    "model": "intfloat/multilingual-e5-small",
+    "batch_size": 32,
+    "use_prefixes": true
+  },
+  "chunking": {
+    "fixed": {
+      "chunk_size_chars": 2000,
+      "overlap_chars": 200
+    },
+    "structure": {
+      "max_chunk_chars": 3000
+    }
+  },
+  "paths": {
+    "index_dir": "index",
+    "results_dir": "results",
+    "logs_dir": "logs"
+  },
+  "search": {
+    "top_k": 5
+  },
+  "eval_queries": [
+    {
+      "query": "Как создать каркас нового дня day_NN командой make?",
+      "source": ".agents/skills/create-day/SKILL.md",
+      "needle": "make new-day"
+    },
+    {
+      "query": "Как подключить общий пакет llm к новому дню через replace в go.mod?",
+      "source": ".agents/skills/create-day/SKILL.md",
+      "needle": "replace aichallenge/llm"
+    },
+    {
+      "query": "Какие тиры моделей weak medium strong сравнивает день 5?",
+      "source": "day_05/README.md",
+      "needle": "weak"
+    },
+    {
+      "query": "Как в пакете llm реализован каскад загрузки .env?",
+      "source": "llm/llm.go",
+      "needle": "loadEnvCascade"
+    },
+    {
+      "query": "Какой базовый URL по умолчанию используется в пакете llm?",
+      "source": "llm/llm.go",
+      "needle": "api.openai.com"
+    },
+    {
+      "query": "Что выводит программа day_01 при запуске через go run с вопросом?",
+      "source": "day_01/README.md",
+      "needle": "go run"
+    }
+  ]
+}

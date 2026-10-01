@@ -1,0 +1,14 @@
+# Виртуальное окружение Python — создаётся `make setup`
+.venv/
+
+# Кэши Python
+__pycache__/
+*.pyc
+
+# Генерируемые артефакты дня
+index/
+results/
+logs/
+
+# Кэш тестов
+.pytest_cache/
