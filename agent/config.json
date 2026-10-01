@@ -22,5 +22,14 @@
     { "name": "tasks", "command": "bin/mcp-server", "args": ["--server", "tasks"] },
     { "name": "scheduler", "command": "bin/mcp-server", "args": ["--server", "scheduler"] },
     { "name": "knowledge", "command": "bin/mcp-server", "args": ["--server", "knowledge"] }
-  ]
+  ],
+  "rag": {
+    "enabled": true,
+    "sidecar_url": "http://127.0.0.1:8734",
+    "index_dir": "../index_service/index",
+    "strategy": "structure",
+    "top_k": 5,
+    "max_context_chars": 6000,
+    "timeout_seconds": 10
+  }
 }

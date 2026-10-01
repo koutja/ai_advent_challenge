@@ -1,0 +1,64 @@
+{
+  "questions": [
+    {
+      "id": "q01",
+      "question": "Как подключить общий пакет llm к новому дню в go.mod?",
+      "expectation": ["replace aichallenge/llm", "require"],
+      "sources": [".agents/skills/create-day/SKILL.md"]
+    },
+    {
+      "id": "q02",
+      "question": "Какие переменные окружения читает пакет llm при создании клиента?",
+      "expectation": ["LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"],
+      "sources": ["llm/llm.go"]
+    },
+    {
+      "id": "q03",
+      "question": "Какой базовый URL использует пакет llm, если LLM_BASE_URL не задана?",
+      "expectation": ["api.openai.com"],
+      "sources": ["llm/llm.go"]
+    },
+    {
+      "id": "q04",
+      "question": "Что сравнивает день 05 и какие тиры моделей он использует?",
+      "expectation": ["weak", "medium", "strong", "стоимость"],
+      "sources": ["day_05/README.md"]
+    },
+    {
+      "id": "q05",
+      "question": "Как запустить программу day_01 с вопросом из командной строки?",
+      "expectation": ["go run", "вопрос"],
+      "sources": ["day_01/README.md"]
+    },
+    {
+      "id": "q06",
+      "question": "Зачем нужна команда make sync в корне репозитория?",
+      "expectation": ["симлинк", "скилл"],
+      "sources": ["Makefile", "README.md"]
+    },
+    {
+      "id": "q07",
+      "question": "Как создать каркас нового дня в репозитории?",
+      "expectation": ["make new-day", "day_NN"],
+      "sources": ["Makefile", ".agents/skills/create-day/SKILL.md"]
+    },
+    {
+      "id": "q08",
+      "question": "Как устроена каскадная загрузка .env и в каком порядке читаются файлы?",
+      "expectation": ["локальный", "корневой"],
+      "sources": ["llm/llm.go", "README.md"]
+    },
+    {
+      "id": "q09",
+      "question": "Какие стратегии управления контекстом поддерживает агент?",
+      "expectation": ["window", "facts", "branch"],
+      "sources": ["agent/config.go"]
+    },
+    {
+      "id": "q10",
+      "question": "Куда инструмент save_to_file сохраняет файлы по умолчанию?",
+      "expectation": ["results/pipeline"],
+      "sources": ["agent/feature/mcp/pipeline.go"]
+    }
+  ]
+}

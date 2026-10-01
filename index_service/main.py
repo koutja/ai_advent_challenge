@@ -297,7 +297,7 @@ def main() -> None:
     setup_logging(logs_dir(cfg))
 
     parser = argparse.ArgumentParser(
-        prog="day_21",
+        prog="index_service",
         description="Локальная индексация документов: chunking, эмбеддинги, FAISS-индекс.",
     )
     sub = parser.add_subparsers(dest="command", required=True)

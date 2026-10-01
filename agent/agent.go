@@ -1,6 +1,7 @@
 package agent
 
 import (
+	stdctx "context"
 	"errors"
 	"fmt"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"agent/feature/invariants"
 	"agent/feature/memory"
 	"agent/feature/profile"
+	"agent/feature/rag"
 	"agent/feature/task"
 )
 
@@ -38,6 +40,8 @@ type Agent struct {
 
 	invariants *invariants.Manager // менеджер инвариантов (feature/invariants); nil — off
 
+	rag *rag.Retriever // ретривер к индексу index_service (feature/rag); nil — RAG off
+
 	mu            sync.Mutex
 	currentEvents []context.StrategyEvent     // события активной стратегии за текущий ход Say()
 	onEvent       func(context.StrategyEvent) // опциональный live-колбэк (SSE-стрим в вебе); nil — выкл
@@ -46,10 +50,12 @@ type Agent struct {
 // Reply — результат одного хода диалога: текст ответа, сырые метаданные запроса
 // от API (Usage) и агрегированная статистика токенов/стоимости (Stats).
 type Reply struct {
-	Text   string
-	Usage  *llm.Result
-	Stats  *TokenStats
-	Events []context.StrategyEvent // события стратегии за этот ход (для лога в чате)
+	Text    string
+	Usage   *llm.Result
+	Stats   *TokenStats
+	Events  []context.StrategyEvent // события стратегии за этот ход (для лога в чате)
+	Sources []rag.Chunk             // найденные RAG-чанки (только SayRAG); nil — без RAG
+	Engine  string                  // движок ретрива: sidecar|keyword; пусто — без RAG
 }
 
 // New создаёт агента: разрешает настройки клиента, подключает многослойную память
@@ -106,6 +112,11 @@ func New(cfg *Config, mem *memory.LayeredMemory) (*Agent, error) {
 			return nil, err
 		}
 		a.invariants = mgr
+	}
+
+	// RAG: ретривер к индексу index_service (микросервис + ключевой fallback).
+	if cfg.Rag != nil {
+		a.rag = rag.NewRetriever(*cfg.Rag)
 	}
 
 	opts := context.Options{
@@ -377,6 +388,51 @@ func (a *Agent) Say(input string) (*Reply, error) {
 	a.mu.Unlock()
 
 	return &Reply{Text: res.Text, Usage: res, Stats: a.buildStats(res, histTokens), Events: events}, nil
+}
+
+// Retriever возвращает ретривер RAG (nil — RAG не настроен в конфиге).
+func (a *Agent) Retriever() *rag.Retriever { return a.rag }
+
+// SayRAG отвечает на вопрос с Retrieval-Augmented Generation:
+//
+//	вопрос → ретрив top-k чанков из индекса index_service →
+//	системный промпт «контекст с источниками» → запрос к LLM.
+//
+// В отличие от Say(), RAG-режим «stateless»: ответ строится только по вопросу
+// и найденному контексту (история/память не подмешиваются) — так проще
+// сравнивать качество с/без RAG. Найденные источники попадают в Reply.Sources,
+// движок ретрива (sidecar|keyword) — в Reply.Engine.
+func (a *Agent) SayRAG(input string) (*Reply, error) {
+	if a.rag == nil {
+		return nil, errors.New("RAG не настроен: добавьте секцию rag в config.json")
+	}
+	ans, err := rag.AnswerRAG(stdctx.Background(), a.client, a.rag, input, a.cfg.MaxTokens)
+	if err != nil {
+		return nil, err
+	}
+	st := &TokenStats{Model: a.client.Model(), ContextWindow: a.cfg.ContextWindow}
+	if ans.Usage != nil {
+		if ans.Usage.PromptTokens >= 0 {
+			st.RequestTokens = ans.Usage.PromptTokens
+		}
+		if ans.Usage.CompletionTokens >= 0 {
+			st.ResponseTokens = ans.Usage.CompletionTokens
+		}
+		if ans.Usage.TotalTokens >= 0 {
+			st.TotalTokens = ans.Usage.TotalTokens
+		}
+		if p, ok := a.prices[ans.Usage.Model]; ok {
+			st.CostUSD = Cost(p, ans.Usage.PromptTokens, ans.Usage.CompletionTokens)
+			st.CostKnown = true
+		}
+	}
+	return &Reply{
+		Text:    ans.Text,
+		Usage:   ans.Usage,
+		Stats:   st,
+		Sources: ans.Sources,
+		Engine:  ans.Engine,
+	}, nil
 }
 
 // prepareMessages собирает сообщения запроса в порядке:

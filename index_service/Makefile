@@ -1,4 +1,4 @@
-.PHONY: setup index index-debug query compare run-all test clean
+.PHONY: setup index index-debug query compare run-all serve test clean
 
 PY := .venv/bin/python
 
@@ -32,6 +32,11 @@ compare:
 # Полный прогон: index (обе стратегии) + compare + пример поиска.
 run-all:
 	$(PY) main.py run-all --docs ../
+
+# HTTP-микросервис доступа к индексу (для агента: agent/feature/rag).
+# Порт можно переопределить: make serve PORT=9000
+serve:
+	$(PY) serve.py --port $(PORT)
 
 # Юнит-тесты чанкеров.
 test:

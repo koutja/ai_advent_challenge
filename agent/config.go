@@ -7,6 +7,7 @@ package agent
 
 import (
 	"agent/feature/memory"
+	"agent/feature/rag"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -48,6 +49,12 @@ type Config struct {
 	// MCPServers — список серверов для оркестратора (--mcp-orchestrate).
 	// По умолчанию: три домена одного бинарника (tasks|scheduler|knowledge).
 	MCPServers []MCPServerCfg `json:"mcp_servers,omitempty"`
+
+	// --- RAG (feature/rag): подключение к индексу index_service ---
+	// Rag — настройки ретривера: адрес микросервиса index_service/serve.py,
+	// папка индекса, стратегия chunking, top-k. nil — RAG выключен (SayRAG
+	// вернёт ошибку). Подключение к LLM при этом остаётся через env (llm пакет).
+	Rag *rag.Config `json:"rag,omitempty"`
 }
 
 // MCPServerCfg — описание одного MCP-сервера для оркестратора.
@@ -59,6 +66,7 @@ type MCPServerCfg struct {
 
 // DefaultConfig возвращает конфиг со значениями по умолчанию.
 func DefaultConfig() *Config {
+	ragCfg := rag.DefaultConfig()
 	return &Config{
 		HistoryFile:     "agent_history.db",
 		LongMemoryFile:  "agent_longterm.db",
@@ -82,6 +90,8 @@ func DefaultConfig() *Config {
 			{Name: "scheduler", Command: "bin/mcp-server", Args: []string{"--server", "scheduler"}},
 			{Name: "knowledge", Command: "bin/mcp-server", Args: []string{"--server", "knowledge"}},
 		},
+		// RAG включён по умолчанию: индекс index_service + микросервис на 127.0.0.1:8734.
+		Rag: &ragCfg,
 	}
 }
 

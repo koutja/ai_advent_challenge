@@ -45,6 +45,9 @@ func main() {
 	mcpDemo := flag.Bool("mcp-demo", false, "демо планировщика: напоминание + периодический сбор данных + сводка")
 	mcpPipeline := flag.String("mcp-pipeline", "", "пайплайн: search → summarize → save_to_file по запросу")
 	mcpOrchestrate := flag.String("mcp-orchestrate", "", "длинный флоу через несколько MCP-серверов по теме")
+	ragQ := flag.String("rag", "", "RAG-ответ на вопрос: поиск чанков в индексе index_service + LLM с источниками")
+	ragEval := flag.Bool("rag-eval", false, "сравнить качество без RAG и с RAG на контрольных вопросах (results/rag_comparison.md)")
+	ragJudge := flag.Bool("judge", false, "добавить LLM-as-judge к --rag-eval")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -70,6 +73,16 @@ func main() {
 	}
 	if *mcpOrchestrate != "" {
 		runMCPOrchestrate(cfg, *mcpOrchestrate)
+		return
+	}
+
+	// --- RAG (День 22: первый RAG-запрос) ---
+	if *ragQ != "" {
+		runRAGAnswer(cfg, *ragQ)
+		return
+	}
+	if *ragEval {
+		runRAGEval(cfg, *ragJudge)
 		return
 	}
 
@@ -255,6 +268,24 @@ func main() {
 			} else {
 				fmt.Println("== Длинный флоу: 3 MCP-сервера ==")
 				fmt.Print(out)
+			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/rag"):
+			query := strings.TrimSpace(strings.TrimPrefix(line, "/rag"))
+			if query == "" {
+				fmt.Println("использование: /rag <вопрос>")
+				fmt.Print("> ")
+				continue
+			}
+			reply, err := ag.SayRAG(query)
+			if err != nil {
+				fmt.Println("ошибка:", err)
+			} else {
+				fmt.Println(reply.Text)
+				if reply.Engine != "" {
+					fmt.Printf("[RAG: движок %s, источников: %d]\n", reply.Engine, len(reply.Sources))
+				}
 			}
 			fmt.Print("> ")
 			continue

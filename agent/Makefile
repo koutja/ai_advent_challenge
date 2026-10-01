@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -54,6 +54,19 @@ run-mcp-pipeline:
 # Пример: make run-mcp-orchestrate QUERY=mcp
 run-mcp-orchestrate:
 	go run ./cmd/cli --mcp-orchestrate "$(QUERY)"
+
+# ===== RAG (День 22): первый RAG-запрос =====
+# Требует индекс index_service (cd ../index_service && make index) и, для
+# семантического движка, запущенный микросервис (make serve в index_service).
+# Пример: make run-rag QUERY="как подключить пакет llm"
+run-rag:
+	go run ./cmd/cli --rag "$(QUERY)"
+
+# Сравнение качества: без RAG vs с RAG на 10 контрольных вопросах.
+# Отчёт: agent/results/rag_comparison.md. Опционально добавить LLM-as-judge:
+#   make run-rag-eval JUDGE=1
+run-rag-eval:
+	go run ./cmd/cli --rag-eval $(if $(JUDGE),--judge,)
 
 # ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
 build-mcp-server:

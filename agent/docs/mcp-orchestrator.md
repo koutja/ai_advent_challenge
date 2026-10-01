@@ -23,7 +23,7 @@
 |---|---|---|
 | Сервер №1 | `--server tasks` | `get_task`, `create_task` |
 | Сервер №2 | `--server scheduler` | `reminder_add`, `reminders_status`, `collect_start`, `collect_status`, `summary_start`, `get_summary` |
-| Сервер №3 | `--server knowledge` | `search`, `summarize`, `save_to_file`, `generate_document` |
+| Сервер №3 | `--server knowledge` | `search`, `summarize`, `save_to_file`, `generate_document`, `rag_search`, `rag_answer` |
 | (общий) | `--server all` | демо `get_time`, `echo` + все домены (по умолчанию, для обратной совместимости) |
 
 То есть один «сервер» = один процесс со своей порцией инструментов. Раньше всё

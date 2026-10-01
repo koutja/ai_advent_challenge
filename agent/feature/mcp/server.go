@@ -21,6 +21,8 @@
 package mcpx
 
 import (
+	"agent/feature/rag"
+	"aichallenge/llm"
 	"context"
 	"fmt"
 	"os"
@@ -191,6 +193,35 @@ func addKnowledgeTools(s *mcp.Server) {
 		}
 		return nil, doc, nil
 	})
+
+	// --- RAG: доступ к индексу index_service (микросервис serve.py + fallback) ---
+	// Конфигурация ретривера для автономного MCP-процесса берётся из env RAG_*;
+	// в ядре агента (SayRAG) используется секция rag из agent/config.json.
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "rag_search",
+		Description: "Семантический поиск по индексу index_service: вопрос → top-k чанков с источниками (source/section). Микросервис serve.py; если недоступен — ключевой поиск по chunks.jsonl.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in ragSearchInput) (*mcp.CallToolResult, ragSearchOutput, error) {
+		res, err := rag.NewRetrieverFromEnv().Retrieve(context.Background(), in.Query)
+		if err != nil {
+			return nil, ragSearchOutput{}, fmt.Errorf("rag_search: %w", err)
+		}
+		return nil, ragSearchOutput{Engine: res.Engine, Strategy: res.Strategy, Chunks: res.Chunks}, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "rag_answer",
+		Description: "Первый RAG-запрос: вопрос → поиск чанков в индексе index_service → контекст с источниками + вопрос → ответ LLM со ссылками [1]…[n].",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ragAnswerInput) (*mcp.CallToolResult, ragAnswerOutput, error) {
+		client, err := llm.New()
+		if err != nil {
+			return nil, ragAnswerOutput{}, fmt.Errorf("rag_answer: LLM: %w", err)
+		}
+		ans, err := rag.AnswerRAG(ctx, client, rag.NewRetrieverFromEnv(), in.Query, 0)
+		if err != nil {
+			return nil, ragAnswerOutput{}, fmt.Errorf("rag_answer: %w", err)
+		}
+		return nil, ragAnswerOutput{Answer: ans.Text, Engine: ans.Engine, Sources: ans.Sources}, nil
+	})
 }
 
 // addSchedulerTools регистрирует инструменты домена scheduler (планировщик).
@@ -345,6 +376,30 @@ type saveToFileInput struct {
 	Filename string `json:"filename" jsonschema:"имя файла без путей (пишется в results/pipeline)"`
 	// Content — содержимое файла.
 	Content string `json:"content" jsonschema:"содержимое файла"`
+}
+
+type ragSearchInput struct {
+	// Query — поисковый запрос (обязательно).
+	Query string `json:"query" jsonschema:"поисковый запрос (обязательное поле)"`
+	// TopK — максимум чанков (по умолчанию из конфига, обычно 5).
+	TopK int `json:"top_k,omitempty" jsonschema:"максимум чанков; по умолчанию из конфига"`
+}
+
+type ragSearchOutput struct {
+	Engine   string      `json:"engine"`   // sidecar | keyword
+	Strategy string      `json:"strategy"` // fixed | structure
+	Chunks   []rag.Chunk `json:"chunks"`
+}
+
+type ragAnswerInput struct {
+	// Query — вопрос для RAG-ответа (обязательно).
+	Query string `json:"query" jsonschema:"вопрос для RAG-ответа (обязательное поле)"`
+}
+
+type ragAnswerOutput struct {
+	Answer  string      `json:"answer"`
+	Engine  string      `json:"engine"` // sidecar | keyword
+	Sources []rag.Chunk `json:"sources,omitempty"`
 }
 
 type reminderAddInput struct {

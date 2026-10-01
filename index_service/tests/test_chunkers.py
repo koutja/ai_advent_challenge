@@ -1,4 +1,4 @@
-"""Юнит-тесты чанкеров day_21 (pytest).
+"""Юнит-тесты чанкеров index_service (pytest).
 
 Запуск: make test  (или .venv/bin/python -m pytest -q)
 """

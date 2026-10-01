@@ -198,7 +198,7 @@ def write_comparison_report(
         for df, ds in zip(e_fixed["queries"], e_struct["queries"])
     )
 
-    report = f"""# Сравнение стратегий chunking — day_21
+    report = f"""# Сравнение стратегий chunking — index_service
 
 _Сформировано {today}_
 

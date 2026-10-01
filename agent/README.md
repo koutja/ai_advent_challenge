@@ -42,6 +42,9 @@ go run ./cmd/cli --compare-profiles  # влияние персонализаци
 go run ./cmd/cli --check-invariants  # демо: конфликт запроса с инвариантом → отказ
 go run ./cmd/cli --mcp-tools         # MCP: подключиться к серверу и вывести список инструментов
 go run ./cmd/mcp-server              # MCP: запустить сервер как отдельный процесс (stdio)
+go run ./cmd/cli --rag "вопрос"      # RAG-ответ: индекс index_service + LLM с источниками
+go run ./cmd/cli --rag-eval          # сравнение без RAG vs с RAG на 10 контрольных вопросах
+go run ./cmd/cli --rag-eval --judge  # то же + LLM-as-judge
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
 go run ./cmd/web --strategy branch   # web-чат со стратегией по умолчанию (window|facts|branch)
 make stop-web                        # остановить ранее запущенный go run ./cmd/web (по порту 8080)
@@ -316,6 +319,48 @@ CLI-сравнение стратегий (`--compare-strategies`) оставл�
 | `/invariant add <cat>|<title>|<text>` | добавить правило (архитектура\|техническое решение\|стек\|бизнес-правило) |
 | `/invariant rm <id>` `/invariant show <id>` | удалить / показать инвариант |
 | `/exit` `/quit` `/q` | выйти |
+
+## RAG (Retrieval-Augmented Generation)
+
+Агент умеет отвечать с опорой на локальный индекс документов
+([`../index_service`](../index_service)) — «День 22: первый RAG-запрос».
+
+**Пайплайн** (`Agent.SayRAG`): вопрос → ретрив top-k чанков из индекса →
+системный промпт «контекст с источниками [1]…[n]» → ответ LLM со ссылками
+на источники. Без RAG (`Say`) — обычный ответ без контекста.
+
+Ретривер [`feature/rag`](feature/rag) работает в два уровня:
+1. **semantic** — микросервис [`../index_service/serve.py`](../index_service/serve.py)
+   (модель эмбеддингов и FAISS живут в Python): `POST /search`.
+   Запуск: `cd ../index_service && make serve` (по умолчанию порт 8734);
+2. **keyword fallback** — если микросервис недоступен, агент сам детерминированно
+   ищет по `index_service/index/<strategy>/chunks.jsonl` (движок `keyword`).
+
+Конфигурация — секция `rag` в [`config.json`](config.json): `sidecar_url`,
+`index_dir`, `strategy`, `top_k`, `max_context_chars`, `timeout_seconds`.
+Для автономного mcp-server используются env-переменные
+`RAG_SIDECAR_URL` / `RAG_INDEX_DIR` / `RAG_STRATEGY` / `RAG_TOP_K`.
+
+```bash
+make run-rag QUERY="как подключить пакет llm"   # RAG-ответ с источниками
+make run-rag-eval                                # 10 контрольных вопросов: с RAG и без
+make run-rag-eval JUDGE=1                        # + LLM-as-judge
+# в REPL: /rag <вопрос>
+```
+
+Контрольные вопросы — [`rag_questions.json`](rag_questions.json): для каждого
+вопроса заданы **ожидаемые факты** (что должно быть в ответе) и **ожидаемые
+источники** (какие файлы должен найти ретривер). Отчёт сравнения качества
+пишется в `results/rag_comparison.md`.
+
+Текущий результат на корпусе index_service (146 документов, ≈304 стр.):
+
+| Показатель | без RAG | с RAG |
+|---|---|---|
+| Покрытие ожидаемых фактов | 4/22 (18%) | **20/22 (91%)** |
+
+MCP: инструменты `rag_search` (найти чанки) и `rag_answer` (RAG-ответ со
+ссылками) доступны в домене `knowledge` того же `bin/mcp-server`.
 
 ## Стратегии управления контекстом
 
