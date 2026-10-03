@@ -56,6 +56,11 @@ type Reply struct {
 	Events  []context.StrategyEvent // события стратегии за этот ход (для лога в чате)
 	Sources []rag.Chunk             // найденные RAG-чанки (только SayRAG); nil — без RAG
 	Engine  string                  // движок ретрива: sidecar|keyword; пусто — без RAG
+
+	// --- День 24: цитаты и анти-галлюцинации ---
+	Unknown  bool          // режим «не знаю»: контекст слабый, ответ без вызова LLM
+	Citation *rag.Citation // разобранные секции Ответ/Источники/Цитаты (nil — без строгого формата)
+	FormatOK bool          // модель соблюла строгий формат (все 3 секции)
 }
 
 // New создаёт агента: разрешает настройки клиента, подключает многослойную память
@@ -427,11 +432,14 @@ func (a *Agent) SayRAG(input string) (*Reply, error) {
 		}
 	}
 	return &Reply{
-		Text:    ans.Text,
-		Usage:   ans.Usage,
-		Stats:   st,
-		Sources: ans.Sources,
-		Engine:  ans.Engine,
+		Text:     ans.Text,
+		Usage:    ans.Usage,
+		Stats:    st,
+		Sources:  ans.Sources,
+		Engine:   ans.Engine,
+		Unknown:  ans.Unknown,
+		Citation: ans.Citation,
+		FormatOK: ans.FormatOK,
 	}, nil
 }
 

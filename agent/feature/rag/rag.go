@@ -51,60 +51,68 @@ const (
 
 // RewriteConfig — query rewrite перед поиском (через общий пакет llm).
 type RewriteConfig struct {
-	Enabled   bool // включать ли переписывание запроса (тратит токены)
-	MaxTokens int  // лимит токенов ответа при переписывании
+	Enabled   bool `json:"enabled"`    // включать ли переписывание запроса (тратит токены)
+	MaxTokens int  `json:"max_tokens"` // лимит токенов ответа при переписывании
 }
 
 // Config — настройки ретривера (не секретные; LLM-подключение не трогаем).
 type Config struct {
-	Enabled         bool   // false — RAG выключен
-	SidecarURL      string // базовый URL микросервиса index_service, напр. http://127.0.0.1:8734
-	IndexDir        string // папка индексов, напр. ../index_service/index
-	Strategy        string // fixed | structure
-	TopK            int    // сколько чанков брать из индекса (legacy-алиас для TopKFetch)
-	MaxContextChars int    // лимит символов контекста для промпта
-	TimeoutSeconds  int    // таймаут обращения к сайдкару
+	Enabled         bool   `json:"enabled"`           // false — RAG выключен
+	SidecarURL      string `json:"sidecar_url"`       // базовый URL микросервиса index_service
+	IndexDir        string `json:"index_dir"`         // папка индексов, напр. ../index_service/index
+	Strategy        string `json:"strategy"`          // fixed | structure
+	TopK            int    `json:"top_k"`             // сколько чанков брать из индекса (legacy-алиас для TopKFetch)
+	MaxContextChars int    `json:"max_context_chars"` // лимит символов контекста для промпта
+	TimeoutSeconds  int    `json:"timeout_seconds"`   // таймаут обращения к сайдкару
 
 	// --- Этап 2: фильтрация и реранкинг (День 23) ---
-	TopKFetch     int     // сколько чанков берём из индекса ДО фильтрации
-	TopKKeep      int     // сколько оставляем в контексте ПОСЛЕ фильтра/реранка
-	MinScore      float64 // порог отсечения нерелевантных чанков (cosine 0..1)
-	FilterEnabled bool    // применять ли фильтр по MinScore
-	RerankMode    string  // off | heuristic | cross_encoder
-	RerankModel   string  // cross-encoder модель для /rerank в serve.py
+	TopKFetch     int     `json:"top_k_fetch"`    // сколько чанков берём из индекса ДО фильтрации
+	TopKKeep      int     `json:"top_k_keep"`     // сколько оставляем в контексте ПОСЛЕ фильтра/реранка
+	MinScore      float64 `json:"min_score"`      // порог отсечения нерелевантных чанков (cosine 0..1)
+	FilterEnabled bool    `json:"filter_enabled"` // применять ли фильтр по MinScore
+	RerankMode    string  `json:"rerank"`         // off | heuristic | cross_encoder
+	RerankModel   string  `json:"rerank_model"`   // cross-encoder модель для /rerank в serve.py
 
-	Rewrite RewriteConfig // query rewrite перед поиском
+	Rewrite RewriteConfig `json:"rewrite"` // query rewrite перед поиском
+
+	// --- Этап 3: обязательные цитаты и анти-галлюцинации (День 24) ---
+	CitationsRequired bool    `json:"citations"`     // требовать от модели секции Ответ/Источники/Цитаты
+	UnknownBelow      float64 `json:"unknown_below"` // порог «не знаю»: top-1 score ниже → отказ без вызова LLM
 }
 
 // DefaultConfig возвращает рабочие дефолты (индекс index_service, стратегия structure).
 func DefaultConfig() Config {
 	return Config{
-		Enabled:         true,
-		SidecarURL:      "http://127.0.0.1:8734",
-		IndexDir:        "../index_service/index",
-		Strategy:        "structure",
-		TopK:            10,
-		MaxContextChars: 6000,
-		TimeoutSeconds:  10,
-		TopKFetch:       10,
-		TopKKeep:        4,
-		MinScore:        0.30,
-		FilterEnabled:   true,
-		RerankMode:      RerankHeuristic,
-		RerankModel:     "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
-		Rewrite:         RewriteConfig{Enabled: false, MaxTokens: 80},
+		Enabled:           true,
+		SidecarURL:        "http://127.0.0.1:8734",
+		IndexDir:          "../index_service/index",
+		Strategy:          "structure",
+		TopK:              10,
+		MaxContextChars:   6000,
+		TimeoutSeconds:    10,
+		TopKFetch:         10,
+		TopKKeep:          4,
+		MinScore:          0.30,
+		FilterEnabled:     true,
+		RerankMode:        RerankHeuristic,
+		RerankModel:       "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+		Rewrite:           RewriteConfig{Enabled: false, MaxTokens: 80},
+		CitationsRequired: true,
+		UnknownBelow:      0.40,
 	}
 }
 
 // EnvVarNames — имена env-переменных для конфигурации RAG (аналог LLM_* правил).
 const (
-	EnvSidecarURL = "RAG_SIDECAR_URL"
-	EnvIndexDir   = "RAG_INDEX_DIR"
-	EnvStrategy   = "RAG_STRATEGY"
-	EnvTopK       = "RAG_TOP_K"
-	EnvTopKKeep   = "RAG_TOP_K_KEEP"
-	EnvMinScore   = "RAG_MIN_SCORE"
-	EnvRerank     = "RAG_RERANK"
+	EnvSidecarURL   = "RAG_SIDECAR_URL"
+	EnvIndexDir     = "RAG_INDEX_DIR"
+	EnvStrategy     = "RAG_STRATEGY"
+	EnvTopK         = "RAG_TOP_K"
+	EnvTopKKeep     = "RAG_TOP_K_KEEP"
+	EnvMinScore     = "RAG_MIN_SCORE"
+	EnvRerank       = "RAG_RERANK"
+	EnvUnknownBelow = "RAG_UNKNOWN_BELOW"
+	EnvCitationsOff = "RAG_CITATIONS_OFF" // "1"/"true" — выключить обязательные цитаты
 )
 
 // FromEnv собирает Config из env-переменных RAG_* (с дефолтами DefaultConfig).
@@ -140,6 +148,17 @@ func FromEnv() Config {
 		switch v {
 		case RerankOff, RerankHeuristic, RerankCrossEncoder:
 			cfg.RerankMode = v
+		}
+	}
+	if v := os.Getenv(EnvUnknownBelow); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			cfg.UnknownBelow = f
+		}
+	}
+	if v := os.Getenv(EnvCitationsOff); v != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "on":
+			cfg.CitationsRequired = false
 		}
 	}
 	return cfg
@@ -189,6 +208,9 @@ func (c *Config) EnsureDefaults() {
 	}
 	if c.TimeoutSeconds <= 0 {
 		c.TimeoutSeconds = d.TimeoutSeconds
+	}
+	if c.UnknownBelow <= 0 {
+		c.UnknownBelow = d.UnknownBelow
 	}
 }
 

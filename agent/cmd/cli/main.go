@@ -49,6 +49,7 @@ func main() {
 	ragEval := flag.Bool("rag-eval", false, "сравнить качество без RAG и с RAG на контрольных вопросах (results/rag_comparison.md)")
 	ragJudge := flag.Bool("judge", false, "добавить LLM-as-judge к --rag-eval")
 	ragModes := flag.Bool("rag-modes", false, "сравнить режимы пайплайна: base/filter/full (results/rag_modes_comparison.md)")
+	ragCitations := flag.Bool("rag-citations", false, "проверить обязательные источники/цитаты + режим «не знаю» (results/rag_citations.md)")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -88,6 +89,10 @@ func main() {
 	}
 	if *ragModes {
 		runRAGModes(cfg)
+		return
+	}
+	if *ragCitations {
+		runRAGCitations(cfg, *ragJudge)
 		return
 	}
 

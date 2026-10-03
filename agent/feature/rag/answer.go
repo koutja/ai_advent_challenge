@@ -28,6 +28,11 @@ type Answer struct {
 	Stages         PipelineStages
 	Rewritten      bool   // запрос был переписан перед поиском
 	RewrittenQuery string // переписанный запрос (если применялся)
+
+	// --- День 24: цитаты и анти-галлюцинации ---
+	Unknown  bool      // режим «не знаю»: контекст слабый, ответ без вызова LLM
+	Citation *Citation // разобранные секции Ответ/Источники/Цитаты (nil — без строгого формата)
+	FormatOK bool      // модель соблюла строгий формат (все 3 секции)
 }
 
 // ragSystemPrompt — инструкция для RAG-режима (источники обязательны).
@@ -126,13 +131,34 @@ func AnswerRAGWithMode(ctx context.Context, client *llm.Client, retriever *Retri
 		return nil, err
 	}
 
+	// --- Жёсткий гейт «не знаю» (День 24) ---
+	// Если после этапа 2 не осталось чанков либо top-1 score ниже порога —
+	// возвращаем детерминированный отказ без вызова LLM (анти-галлюцинация).
+	topScore := 0.0
+	if len(result.Chunks) > 0 {
+		topScore = result.Chunks[0].Score
+	}
+	if result.Stages.Kept == 0 || topScore < cfg.UnknownBelow {
+		ans.Text = UnknownText
+		ans.Unknown = true
+		ans.Sources = result.Chunks
+		ans.Engine = result.Engine
+		ans.Stages = result.Stages
+		return ans, nil
+	}
+
 	contextText := BuildContext(result.Chunks, cfg.MaxContextChars)
 	if strings.TrimSpace(contextText) == "" {
 		return nil, fmt.Errorf("retrieve вернул пустой контекст (индекс пуст?)")
 	}
 
+	// Промпт: строгий формат с цитатами (День 24) либо базовый (День 22/23).
+	system := ragSystemPrompt
+	if cfg.CitationsRequired {
+		system = citeSystemPrompt
+	}
 	msgs := []llm.Message{
-		{Role: "system", Content: ragSystemPrompt + "\n\nКонтекст:\n" + contextText},
+		{Role: "system", Content: system + "\n\nКонтекст:\n" + contextText},
 		{Role: "user", Content: query},
 	}
 	res, err := chatWithRetry(client, msgs, &llm.Options{MaxTokens: maxTokens}, 3)
@@ -145,5 +171,23 @@ func AnswerRAGWithMode(ctx context.Context, client *llm.Client, retriever *Retri
 	ans.Sources = result.Chunks
 	ans.Engine = result.Engine
 	ans.Stages = result.Stages
+
+	// Разбор строгого формата + мягкий гейт «не знаю» (модель сама отказалась).
+	if cfg.CitationsRequired {
+		cit := ParseCitation(res.Text)
+		ans.Citation = &cit
+		ans.FormatOK = cit.FormatOK
+		if !cit.FormatOK && looksUnknown(res.Text) {
+			ans.Unknown = true
+		}
+	}
 	return ans, nil
+}
+
+// looksUnknown — эвристика: модель ответила «не знаю» без секций (мягкий гейт).
+func looksUnknown(text string) bool {
+	low := strings.ToLower(strings.TrimSpace(text))
+	return strings.Contains(low, "не знаю") ||
+		strings.Contains(low, "нет информации") ||
+		strings.Contains(low, "нет ответа")
 }

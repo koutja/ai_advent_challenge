@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-rag-modes run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-rag-modes run-rag-citations run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -71,6 +71,12 @@ run-rag-eval:
 # Сравнение режимов пайплайна: base / filter / full (этап 2 + query rewrite).
 run-rag-modes:
 	go run ./cmd/cli --rag-modes
+
+# Проверка обязательных источников/цитат + режим «не знаю» (День 24).
+# Отчёт: agent/results/rag_citations.md. Опционально LLM-as-judge:
+#   make run-rag-citations JUDGE=1
+run-rag-citations:
+	go run ./cmd/cli --rag-citations $(if $(JUDGE),--judge,)
 
 # ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
 build-mcp-server:
