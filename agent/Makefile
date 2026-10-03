@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-rag-modes run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -67,6 +67,10 @@ run-rag:
 #   make run-rag-eval JUDGE=1
 run-rag-eval:
 	go run ./cmd/cli --rag-eval $(if $(JUDGE),--judge,)
+
+# Сравнение режимов пайплайна: base / filter / full (этап 2 + query rewrite).
+run-rag-modes:
+	go run ./cmd/cli --rag-modes
 
 # ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
 build-mcp-server:

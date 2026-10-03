@@ -86,6 +86,56 @@ func runRAGEval(cfg *agent.Config, judge bool) {
 	fmt.Printf("Полный отчёт: %s\n", path)
 }
 
+// runRAGModes — сравнение трёх режимов пайплайна (base / filter / full):
+// фильтрация по MinScore, реранкинг и query rewrite. Отчёт — results/.
+func runRAGModes(cfg *agent.Config) {
+	mem, err := memory.NewLayeredSQLite(cfg.HistoryFile, cfg.LongMemoryFile)
+	if err != nil {
+		die(err)
+	}
+	defer mem.Close()
+
+	ag, err := agent.New(cfg, mem)
+	if err != nil {
+		die(err)
+	}
+	if ag.Retriever() == nil {
+		die(errors.New("RAG не настроен: добавьте секцию rag в config.json"))
+	}
+
+	qs, err := rag.LoadQuestions("rag_questions.json")
+	if err != nil {
+		die(err)
+	}
+	fmt.Printf("Контрольных вопросов: %d; режимы: base / filter / full\n", len(qs))
+
+	comps := rag.RunModeComparison(stdctx.Background(), ag.Client(), ag.Retriever(), qs, cfg.MaxTokens)
+	report := rag.RenderModesReport(comps, ag.Retriever().Config())
+
+	if err := os.MkdirAll("results", 0o755); err != nil {
+		die(err)
+	}
+	path := "results/rag_modes_comparison.md"
+	if err := os.WriteFile(path, []byte(report), 0o644); err != nil {
+		die(err)
+	}
+
+	// Консольная сводка.
+	fmt.Printf("\n%-8s %-12s %-12s\n", "режим", "факты", "источники")
+	for _, m := range rag.Modes {
+		hits, total, src := 0, 0, 0
+		for _, c := range comps {
+			hits += c.Cases[m].FactHits
+			total += c.Cases[m].FactTotal
+			if c.Cases[m].SourceFound {
+				src++
+			}
+		}
+		fmt.Printf("%-8s %-3d/%-8d %-3d/%-8d\n", m, hits, total, src, len(qs))
+	}
+	fmt.Printf("\nПолный отчёт: %s\n", path)
+}
+
 func tokensOrDash(r *agent.Reply) int {
 	if r.Usage == nil || r.Usage.TotalTokens < 0 {
 		return 0

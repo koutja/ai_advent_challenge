@@ -227,3 +227,158 @@ func orDash(s string) string {
 	}
 	return s
 }
+
+// --- Сравнение режимов пайплайна (День 23) -----------------------------------
+
+// ModeCase — результат ответа в одном режиме (base | filter | full).
+type ModeCase struct {
+	Mode        RAGMode
+	Answer      string
+	FactHits    int
+	FactTotal   int
+	SourceFound bool
+	Engine      string // sidecar | keyword
+	Stages      PipelineStages
+	Rewritten   bool
+	Usage       *llm.Result
+}
+
+// ModeComparison — результаты одного вопроса во всех режимах.
+type ModeComparison struct {
+	Question Question
+	Cases    map[RAGMode]ModeCase
+}
+
+// Modes — порядок режимов в сравнении.
+var Modes = []RAGMode{ModeBase, ModeFilter, ModeFull}
+
+// RunModeComparison прогоняет контрольные вопросы во всех режимах пайплайна.
+func RunModeComparison(
+	ctx context.Context,
+	client *llm.Client,
+	retriever *Retriever,
+	qs []Question,
+	maxTokens int,
+) []ModeComparison {
+	out := make([]ModeComparison, 0, len(qs))
+	for _, q := range qs {
+		comp := ModeComparison{Question: q, Cases: make(map[RAGMode]ModeCase)}
+		for _, mode := range Modes {
+			c := ModeCase{Mode: mode}
+			if a, err := AnswerRAGWithMode(ctx, client, retriever, q.Question, maxTokens, mode); err == nil {
+				c.Answer = a.Text
+				c.Engine = a.Engine
+				c.Stages = a.Stages
+				c.Rewritten = a.Rewritten
+				c.Usage = a.Usage
+				c.SourceFound = SourceFound(a.Sources, q.Sources)
+			} else {
+				c.Answer = fmt.Sprintf("(ошибка: %v)", err)
+			}
+			c.FactHits, c.FactTotal = FactCoverage(c.Answer, q.Expectation)
+			comp.Cases[mode] = c
+		}
+		out = append(out, comp)
+	}
+	return out
+}
+
+// RenderModesReport формирует markdown-отчёт сравнения режимов пайплайна.
+func RenderModesReport(comps []ModeComparison, cfg Config) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Сравнение режимов RAG-пайплайна (фильтрация/реранкинг/rewrite)\n\n")
+	fmt.Fprintf(&b, "_Сформировано %s_\n\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(&b, "Индекс: `%s` (%s), порог MinScore: %.2f, top_k_fetch=%d → top_k_keep=%d, реранк: %s\n\n",
+		cfg.IndexDir, cfg.Strategy, cfg.MinScore, cfg.TopKFetch, cfg.TopKKeep, cfg.RerankMode)
+
+	// Итоги по режимам.
+	type agg struct {
+		factsHits, factsTotal, sources int
+		keptSum, fetchedSum            int
+	}
+	aggs := map[RAGMode]*agg{}
+	for _, m := range Modes {
+		aggs[m] = &agg{}
+	}
+	for _, c := range comps {
+		for _, m := range Modes {
+			cc := c.Cases[m]
+			a := aggs[m]
+			a.factsHits += cc.FactHits
+			a.factsTotal += cc.FactTotal
+			if cc.SourceFound {
+				a.sources++
+			}
+			a.keptSum += cc.Stages.Kept
+			a.fetchedSum += cc.Stages.Fetched
+		}
+	}
+
+	fmt.Fprintf(&b, "## Сводка по режимам\n\n")
+	fmt.Fprintf(&b, "| Режим | Факты | Источники найдены | Чанков (fetched→kept, ср.) |\n|---|---|---|---|\n")
+	for _, m := range Modes {
+		a := aggs[m]
+		avgKept, avgFetched := 0, 0
+		if n := len(comps); n > 0 {
+			avgKept = a.keptSum / n
+			avgFetched = a.fetchedSum / n
+		}
+		fmt.Fprintf(&b, "| %s | %d/%d | %d/%d | %d→%d |\n",
+			m, a.factsHits, a.factsTotal, a.sources, len(comps), avgFetched, avgKept)
+	}
+
+	// Детали по вопросам.
+	fmt.Fprintf(&b, "\n## Детали по вопросам\n\n")
+	fmt.Fprintf(&b, "| id | base (факты) | filter (факты/ист.) | full (факты/ист., rewrite) |\n|---|---|---|---|\n")
+	for _, c := range comps {
+		cb, cf, cfu := c.Cases[ModeBase], c.Cases[ModeFilter], c.Cases[ModeFull]
+		rw := ""
+		if cfu.Rewritten {
+			rw = " ✓"
+		}
+		fmt.Fprintf(&b, "| %s | %d/%d | %d/%d, %v | %d/%d, %v%s |\n",
+			c.Question.ID,
+			cb.FactHits, cb.FactTotal,
+			cf.FactHits, cf.FactTotal, cf.SourceFound,
+			cfu.FactHits, cfu.FactTotal, cfu.SourceFound, rw)
+	}
+
+	// Вердикт.
+	best := ModeBase
+	for _, m := range Modes {
+		if aggs[m].factsHits > aggs[best].factsHits {
+			best = m
+		}
+	}
+	fmt.Fprintf(&b, "\n## Вывод\n\n")
+	fmt.Fprintf(&b, "- По покрытию фактов лучший режим: **%s** (%d/%d).\n", best, aggs[best].factsHits, aggs[best].factsTotal)
+	if aggs[ModeFilter].factsHits > aggs[ModeBase].factsHits {
+		fmt.Fprintf(&b, "- Фильтрация/реранкинг улучшают ответы: filter %d/%d > base %d/%d.\n",
+			aggs[ModeFilter].factsHits, aggs[ModeFilter].factsTotal,
+			aggs[ModeBase].factsHits, aggs[ModeBase].factsTotal)
+	} else {
+		fmt.Fprintf(&b, "- Фильтрация/реранкинг не ухудшили ответы (filter %d/%d vs base %d/%d).\n",
+			aggs[ModeFilter].factsHits, aggs[ModeFilter].factsTotal,
+			aggs[ModeBase].factsHits, aggs[ModeBase].factsTotal)
+	}
+	if aggs[ModeFull].factsHits > aggs[ModeFilter].factsHits {
+		fmt.Fprintf(&b, "- Query rewrite даёт прирост: full %d/%d > filter %d/%d.\n",
+			aggs[ModeFull].factsHits, aggs[ModeFull].factsTotal,
+			aggs[ModeFilter].factsHits, aggs[ModeFilter].factsTotal)
+	} else {
+		fmt.Fprintf(&b, "- Query rewrite не дал прироста (full %d/%d vs filter %d/%d).\n",
+			aggs[ModeFull].factsHits, aggs[ModeFull].factsTotal,
+			aggs[ModeFilter].factsHits, aggs[ModeFilter].factsTotal)
+	}
+
+	// Полные ответы только для базового и полного режимов (для чтения).
+	fmt.Fprintf(&b, "\n## Ответы (base vs full)\n\n")
+	for _, c := range comps {
+		cb, cfu := c.Cases[ModeBase], c.Cases[ModeFull]
+		fmt.Fprintf(&b, "### %s — %s\n\n", c.Question.ID, c.Question.Question)
+		fmt.Fprintf(&b, "**base** (движок %s):\n%s\n\n", orDash(cb.Engine), cb.Answer)
+		fmt.Fprintf(&b, "**full** (движок %s, rewrite: %v):\n%s\n\n---\n\n",
+			orDash(cfu.Engine), cfu.Rewritten, cfu.Answer)
+	}
+	return b.String()
+}

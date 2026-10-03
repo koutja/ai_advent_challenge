@@ -3,6 +3,7 @@ package rag
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -230,5 +231,104 @@ func TestFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.TopK == 0 || cfg.MaxContextChars == 0 {
 		t.Fatalf("дефолты не заполнены: %+v", cfg)
+	}
+}
+
+// --- Этап 2: пайплайн (фильтр / реранк / top-k) -------------------------------
+
+func TestApplyPipelineFiltersByThreshold(t *testing.T) {
+	chunks := []Chunk{
+		{Source: "a.md", Score: 0.90, Text: "про пакет llm"},
+		{Source: "b.md", Score: 0.10, Text: "нерелевантный мусор"},
+		{Source: "c.md", Score: 0.50, Text: "средняя релевантность"},
+	}
+	cfg := Config{FilterEnabled: true, MinScore: 0.3, TopKKeep: 4, RerankMode: RerankOff}
+	st, err := applyPipeline("пакет llm", chunks, cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Chunks) != 2 {
+		t.Fatalf("после фильтра должно остаться 2 чанка, получили %d", len(st.Chunks))
+	}
+	if st.Stages.AfterFilter != 2 || st.Stages.Kept != 2 {
+		t.Fatalf("неверная статистика этапов: %+v", st.Stages)
+	}
+}
+
+func TestApplyPipelineHeuristicRerankOrders(t *testing.T) {
+	chunks := []Chunk{
+		{Source: "sema.md", Score: 0.80, Text: "совсем другое про эмбеддинги"},
+		{Source: "lex.md", Score: 0.60, Text: "подключает пакет llm через go.mod"},
+	}
+	cfg := Config{FilterEnabled: false, MinScore: 0, TopKKeep: 4, RerankMode: RerankHeuristic}
+	st, _ := applyPipeline("как подключить пакет llm в go.mod", chunks, cfg, nil)
+	if len(st.Chunks) != 2 {
+		t.Fatal("оба чанка должны остаться")
+	}
+	if st.Chunks[0].Source != "lex.md" {
+		t.Fatalf("heuristic должен поднять lex.md выше, получили: %s", st.Chunks[0].Source)
+	}
+}
+
+func TestApplyPipelineTruncatesToTopKKeep(t *testing.T) {
+	chunks := make([]Chunk, 6)
+	for i := range chunks {
+		chunks[i] = Chunk{Source: fmt.Sprintf("f%d.md", i), Score: 0.9, Text: "текст"}
+	}
+	cfg := Config{FilterEnabled: true, MinScore: 0.5, TopKKeep: 3, RerankMode: RerankOff}
+	st, _ := applyPipeline("тест", chunks, cfg, nil)
+	if len(st.Chunks) != 3 {
+		t.Fatalf("ожидалось 3 чанка после top_k_keep, получили %d", len(st.Chunks))
+	}
+	if st.Stages.Kept != 3 || st.Stages.Fetched != 6 {
+		t.Fatalf("неверная статистика этапов: %+v", st.Stages)
+	}
+}
+
+func TestApplyPipelineCrossEncoderFallback(t *testing.T) {
+	// cross_encoder без внешнего реранкера (nil) → heuristic fallback.
+	chunks := []Chunk{
+		{Source: "a.md", Score: 0.7, Text: "про пакет llm"},
+		{Source: "b.md", Score: 0.6, Text: "пакет llm подключается"},
+	}
+	cfg := Config{FilterEnabled: false, MinScore: 0, TopKKeep: 4, RerankMode: RerankCrossEncoder}
+	st, err := applyPipeline("пакет llm", chunks, cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Chunks) != 2 {
+		t.Fatalf("fallback должен сохранить оба чанка, получили %d", len(st.Chunks))
+	}
+}
+
+// --- Keyword score нормализация -------------------------------------------------
+
+func TestKeywordScoreIsFraction(t *testing.T) {
+	dir := t.TempDir()
+	writeChunks(t, dir, "structure", sampleRecs())
+	chunks, _ := LoadChunks(dir, "structure")
+	res := KeywordSearch(chunks, "переменные окружения LLM_API_KEY", 5)
+	if len(res) == 0 {
+		t.Fatal("ни одного чанка не найдено")
+	}
+	for _, c := range res {
+		if c.Score < 0 || c.Score > 1 {
+			t.Fatalf("keyword score вне диапазона [0,1]: %v", c.Score)
+		}
+	}
+	if res[0].Source != "docs/c.md" {
+		t.Fatalf("первым должен быть docs/c.md, получили %s", res[0].Source)
+	}
+}
+
+// --- Query rewrite ----------------------------------------------------------------
+
+func TestRewriteQueryNilClientReturnsOriginal(t *testing.T) {
+	q, ok := RewriteQuery(nil, "как подключить пакет llm", 80)
+	if ok {
+		t.Fatal("nil-клиент не должен переписывать запрос")
+	}
+	if q != "как подключить пакет llm" {
+		t.Fatalf("должен вернуться оригинал, получили %q", q)
 	}
 }

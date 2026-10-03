@@ -33,12 +33,26 @@ type Chunk struct {
 	Text    string  `json:"text"`
 }
 
-// Result — результат ретрива: набор чанков и метка движка.
+// Result — результат ретрива: набор чанков, метка движка и статистика этапов.
 type Result struct {
-	Engine   string  // "sidecar" | "keyword"
-	Strategy string  // fixed | structure
-	Model    string  // модель эмбеддингов (если известна)
-	Chunks   []Chunk // топ-k, уже отсортированы по релевантности
+	Engine   string         // "sidecar" | "keyword"
+	Strategy string         // fixed | structure
+	Model    string         // модель эмбеддингов (если известна)
+	Chunks   []Chunk        // топ-k, уже отсортированы по релевантности
+	Stages   PipelineStages // статистика этапа 2 (если пайплайн применялся)
+}
+
+// Режимы реранкинга (этап 2 пайплайна).
+const (
+	RerankOff          = "off"           // только фильтр, без пересортировки
+	RerankHeuristic    = "heuristic"     // гибридный скор в Go: cosine + лексическое пересечение
+	RerankCrossEncoder = "cross_encoder" // отдельная модель в index_service/serve.py (/rerank)
+)
+
+// RewriteConfig — query rewrite перед поиском (через общий пакет llm).
+type RewriteConfig struct {
+	Enabled   bool // включать ли переписывание запроса (тратит токены)
+	MaxTokens int  // лимит токенов ответа при переписывании
 }
 
 // Config — настройки ретривера (не секретные; LLM-подключение не трогаем).
@@ -47,9 +61,19 @@ type Config struct {
 	SidecarURL      string // базовый URL микросервиса index_service, напр. http://127.0.0.1:8734
 	IndexDir        string // папка индексов, напр. ../index_service/index
 	Strategy        string // fixed | structure
-	TopK            int    // сколько чанков отдавать в контекст
+	TopK            int    // сколько чанков брать из индекса (legacy-алиас для TopKFetch)
 	MaxContextChars int    // лимит символов контекста для промпта
 	TimeoutSeconds  int    // таймаут обращения к сайдкару
+
+	// --- Этап 2: фильтрация и реранкинг (День 23) ---
+	TopKFetch     int     // сколько чанков берём из индекса ДО фильтрации
+	TopKKeep      int     // сколько оставляем в контексте ПОСЛЕ фильтра/реранка
+	MinScore      float64 // порог отсечения нерелевантных чанков (cosine 0..1)
+	FilterEnabled bool    // применять ли фильтр по MinScore
+	RerankMode    string  // off | heuristic | cross_encoder
+	RerankModel   string  // cross-encoder модель для /rerank в serve.py
+
+	Rewrite RewriteConfig // query rewrite перед поиском
 }
 
 // DefaultConfig возвращает рабочие дефолты (индекс index_service, стратегия structure).
@@ -59,9 +83,16 @@ func DefaultConfig() Config {
 		SidecarURL:      "http://127.0.0.1:8734",
 		IndexDir:        "../index_service/index",
 		Strategy:        "structure",
-		TopK:            5,
+		TopK:            10,
 		MaxContextChars: 6000,
 		TimeoutSeconds:  10,
+		TopKFetch:       10,
+		TopKKeep:        4,
+		MinScore:        0.30,
+		FilterEnabled:   true,
+		RerankMode:      RerankHeuristic,
+		RerankModel:     "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+		Rewrite:         RewriteConfig{Enabled: false, MaxTokens: 80},
 	}
 }
 
@@ -71,6 +102,9 @@ const (
 	EnvIndexDir   = "RAG_INDEX_DIR"
 	EnvStrategy   = "RAG_STRATEGY"
 	EnvTopK       = "RAG_TOP_K"
+	EnvTopKKeep   = "RAG_TOP_K_KEEP"
+	EnvMinScore   = "RAG_MIN_SCORE"
+	EnvRerank     = "RAG_RERANK"
 )
 
 // FromEnv собирает Config из env-переменных RAG_* (с дефолтами DefaultConfig).
@@ -88,8 +122,24 @@ func FromEnv() Config {
 		cfg.Strategy = strings.TrimSpace(v)
 	}
 	if v := os.Getenv(EnvTopK); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 20 {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 50 {
 			cfg.TopK = n
+		}
+	}
+	if v := os.Getenv(EnvTopKKeep); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 20 {
+			cfg.TopKKeep = n
+		}
+	}
+	if v := os.Getenv(EnvMinScore); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			cfg.MinScore = f
+		}
+	}
+	if v := os.Getenv(EnvRerank); v != "" {
+		switch v {
+		case RerankOff, RerankHeuristic, RerankCrossEncoder:
+			cfg.RerankMode = v
 		}
 	}
 	return cfg
@@ -109,6 +159,30 @@ func (c *Config) EnsureDefaults() {
 	}
 	if c.TopK <= 0 {
 		c.TopK = d.TopK
+	}
+	if c.TopKFetch <= 0 {
+		c.TopKFetch = c.TopK // legacy-алиас: топ-k из индекса
+	}
+	if c.TopKKeep <= 0 {
+		c.TopKKeep = d.TopKKeep
+	}
+	if c.TopKKeep > c.TopKFetch {
+		c.TopKKeep = c.TopKFetch
+	}
+	if c.MinScore <= 0 {
+		c.MinScore = d.MinScore
+	}
+	if c.RerankModel == "" {
+		c.RerankModel = d.RerankModel
+	}
+	switch c.RerankMode {
+	case RerankOff, RerankHeuristic, RerankCrossEncoder:
+		// валидный режим
+	default:
+		c.RerankMode = d.RerankMode
+	}
+	if c.Rewrite.MaxTokens <= 0 {
+		c.Rewrite.MaxTokens = d.Rewrite.MaxTokens
 	}
 	if c.MaxContextChars <= 0 {
 		c.MaxContextChars = d.MaxContextChars

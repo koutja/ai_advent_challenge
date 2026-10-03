@@ -139,6 +139,7 @@ make serve
 |----------|------------|
 | `GET /health` | статус: индекс, стратегия, число чанков, движок |
 | `POST /search` | тело `{"query": "...", "top_k": 5}` → top-k чанков с метаданными (`source`, `section`, `chunk_id`, `score`) и полным текстом |
+| `POST /rerank` | тело `{"query": "...", "chunks": [ ... ]}` → те же чанки, пересортированные **cross-encoder** моделью (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`); ленивая загрузка (первый вызов качает модель ~470 МБ), при ошибке загрузки — `501` |
 
 ```bash
 make serve                                    # http://127.0.0.1:8734
@@ -146,7 +147,15 @@ curl -s http://127.0.0.1:8734/health
 curl -s -X POST http://127.0.0.1:8734/search \
      -H 'Content-Type: application/json' \
      -d '{"query":"как подключить пакет llm","top_k":3}'
+# реранк уже найденных чанков (top-3 из /search → их поля chunks:[{source,text},...]):
+curl -s -X POST http://127.0.0.1:8734/rerank \
+     -H 'Content-Type: application/json' \
+     -d '{"query":"как подключить пакет llm","chunks":[{"source":"a.md","text":"..."}]}'
 ```
+
+`/rerank` используется агентом в режиме `rerank=cross_encoder`
+(`agent/feature/rag`); если модель недоступна — агент сам переключается на
+эвристический реранк (cosine + лексика) и продолжает работу.
 
 Агент при недоступности сервиса автоматически переключается на ключевой поиск
 прямо по `chunks.jsonl` — RAG продолжает работать офлайн.

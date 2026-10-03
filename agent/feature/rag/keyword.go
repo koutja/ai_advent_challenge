@@ -61,13 +61,17 @@ func KeywordSearch(chunks []chunkRecord, query string, topK int) []Chunk {
 		topK = 5
 	}
 	tokens := tokenize(query)
+	maxTokens := len(tokens)
+	if maxTokens == 0 {
+		maxTokens = 1 // защита от деления на ноль (пустой запрос)
+	}
 
 	type hit struct {
 		chunk Chunk
 		score int
 	}
 	var hits []hit
-	for i, c := range chunks {
+	for _, c := range chunks {
 		hay := strings.ToLower(c.Metadata.Source + " " + c.Metadata.Title + " " +
 			c.Metadata.Section + " " + c.Text)
 		score := 0
@@ -91,7 +95,6 @@ func KeywordSearch(chunks []chunkRecord, query string, topK int) []Chunk {
 			},
 			score: score,
 		})
-		_ = i
 	}
 
 	sort.SliceStable(hits, func(a, b int) bool { return hits[a].score > hits[b].score })
@@ -102,7 +105,9 @@ func KeywordSearch(chunks []chunkRecord, query string, topK int) []Chunk {
 	out := make([]Chunk, 0, len(hits))
 	for rank, h := range hits {
 		h.chunk.Rank = rank + 1
-		h.chunk.Score = float64(h.score) // «сырые» очки совпадений
+		// Нормализуем скор в долю совпавших токенов запроса (0..1), чтобы
+		// порог MinScore из этапа 2 работал одинаково и для keyword-движка.
+		h.chunk.Score = float64(h.score) / float64(maxTokens)
 		out = append(out, h.chunk)
 	}
 	return out

@@ -28,7 +28,14 @@
     "sidecar_url": "http://127.0.0.1:8734",
     "index_dir": "../index_service/index",
     "strategy": "structure",
-    "top_k": 5,
+    "top_k": 10,
+    "top_k_fetch": 10,
+    "top_k_keep": 4,
+    "min_score": 0.3,
+    "filter_enabled": true,
+    "rerank": "heuristic",
+    "rerank_model": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+    "rewrite": { "enabled": false, "max_tokens": 80 },
     "max_context_chars": 6000,
     "timeout_seconds": 10
   }

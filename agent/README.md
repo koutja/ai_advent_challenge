@@ -323,42 +323,79 @@ CLI-сравнение стратегий (`--compare-strategies`) оставл�
 ## RAG (Retrieval-Augmented Generation)
 
 Агент умеет отвечать с опорой на локальный индекс документов
-([`../index_service`](../index_service)) — «День 22: первый RAG-запрос».
+([`../index_service`](../index_service)) — «День 22: первый RAG-запрос»,
+«День 23: реранкинг и фильтрация».
 
-**Пайплайн** (`Agent.SayRAG`): вопрос → ретрив top-k чанков из индекса →
-системный промпт «контекст с источниками [1]…[n]» → ответ LLM со ссылками
-на источники. Без RAG (`Say`) — обычный ответ без контекста.
+**Пайплайн** (`Agent.SayRAG`, две стадии):
+1. **Ретрив** — `top_k_fetch` чанков из индекса;
+2. **Фильтрация + реранкинг** (этап 2, по конфигу) — отсев по `min_score`,
+   пересортировка и обрезка до `top_k_keep`;
+3. Системный промпт «контекст с источниками [1]…[n]» → ответ LLM со ссылками.
+
+Без RAG (`Say`) — обычный ответ без контекста.
 
 Ретривер [`feature/rag`](feature/rag) работает в два уровня:
 1. **semantic** — микросервис [`../index_service/serve.py`](../index_service/serve.py)
-   (модель эмбеддингов и FAISS живут в Python): `POST /search`.
+   (модель эмбеддингов и FAISS живут в Python): `POST /search` и `POST /rerank`.
    Запуск: `cd ../index_service && make serve` (по умолчанию порт 8734);
 2. **keyword fallback** — если микросервис недоступен, агент сам детерминированно
    ищет по `index_service/index/<strategy>/chunks.jsonl` (движок `keyword`).
 
-Конфигурация — секция `rag` в [`config.json`](config.json): `sidecar_url`,
-`index_dir`, `strategy`, `top_k`, `max_context_chars`, `timeout_seconds`.
-Для автономного mcp-server используются env-переменные
-`RAG_SIDECAR_URL` / `RAG_INDEX_DIR` / `RAG_STRATEGY` / `RAG_TOP_K`.
+**Этап 2 (День 23)** — секция `rag` в [`config.json`](config.json):
+
+| Поле | env | Дефолт | Смысл |
+|---|---|---|---|
+| `top_k_fetch` | `RAG_TOP_K` | 10 | сколько чанков берём из индекса до этапа 2 |
+| `top_k_keep` | `RAG_TOP_K_KEEP` | 4 | сколько остаётся в контексте после этапа 2 |
+| `min_score` | `RAG_MIN_SCORE` | 0.30 | порог отсева нерелевантных чанков (0..1) |
+| `filter_enabled` | — | true | применять ли фильтр по порогу |
+| `rerank` | `RAG_RERANK` | heuristic | `off` / `heuristic` / `cross_encoder` |
+| `rerank_model` | — | cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 | модель `POST /rerank` в serve.py |
+| `rewrite.enabled` | — | false | query rewrite через LLM перед поиском |
+| `rewrite.max_tokens` | — | 80 | лимит токенов при переписывании |
+
+- `heuristic` — гибридный скор в Go: `0.7×cosine + 0.3×лексическое пересечение`
+  (работает и для sidecar, и для keyword-движка, т.к. скоры нормализованы в 0..1);
+- `cross_encoder` — отдельная модель в index_service (`POST /rerank`), ленивая
+  загрузка, при недоступности — graceful fallback на `heuristic`.
+
+Прочие поля: `sidecar_url`, `index_dir`, `strategy`, `top_k` (legacy-алиас
+`top_k_fetch`), `max_context_chars`, `timeout_seconds`. Для автономного mcp-server —
+env-переменные `RAG_SIDECAR_URL` / `RAG_INDEX_DIR` / `RAG_STRATEGY` / `RAG_TOP_K`.
 
 ```bash
 make run-rag QUERY="как подключить пакет llm"   # RAG-ответ с источниками
-make run-rag-eval                                # 10 контрольных вопросов: с RAG и без
+make run-rag-eval                                # 11 контрольных вопросов: с RAG и без
 make run-rag-eval JUDGE=1                        # + LLM-as-judge
+make run-rag-modes                               # сравнение режимов base/filter/full
 # в REPL: /rag <вопрос>
 ```
 
 Контрольные вопросы — [`rag_questions.json`](rag_questions.json) (11 шт.): для
 каждого вопроса заданы **ожидаемые факты** (что должно быть в ответе) и
-**ожидаемые источники** (какие файлы должен найти ретривер). Отчёт сравнения
-качества пишется в `results/rag_comparison.md`.
+**ожидаемые источники** (какие файлы должен найти ретривер). Отчёты пишутся в
+`results/rag_comparison.md` (с/без RAG) и `results/rag_modes_comparison.md`
+(режимы этапа 2).
 
 Текущий результат на корпусе index_service (147 документов, ≈306 стр.):
 
-| Показатель | без RAG | с RAG |
+| Показатель | без RAG | с RAG (filter) |
 |---|---|---|
 | Покрытие ожидаемых фактов | 10/25 (40%) | **24/25 (96%)** |
 | Ожидаемые источники найдены | — | 9/11 |
+
+Сравнение режимов этапа 2 (`make run-rag-modes`, 11 вопросов):
+
+| Режим | Этап 2 | Факты | Источники | fetched→kept |
+|---|---|---|---|---|
+| `base` | выкл (только top_k_keep) | 23/25 | 8/11 | 10→4 |
+| `filter` | min_score + heuristic-реранк | **24/25** | 8/11 | 10→4 |
+| `full` | + query rewrite | 21/25 | 7/11 | 10→4 |
+
+**Честный вывод:** фильтрация/реранкинг дают небольшой прирост (24/25 > 23/25);
+query rewrite на этом корпусе **вредит** (21/25 < 24/25) — вопросы уже лаконичны,
+а переписывание размывает запрос. По умолчанию включён режим `filter`
+(rewrite выключен).
 
 MCP: инструменты `rag_search` (найти чанки) и `rag_answer` (RAG-ответ со
 ссылками) доступны в домене `knowledge` того же `bin/mcp-server`.

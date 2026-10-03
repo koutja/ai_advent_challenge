@@ -9,12 +9,25 @@ import (
 	"aichallenge/llm"
 )
 
+// RAGMode — режим RAG-пайплайна (для сравнения качества в eval).
+type RAGMode string
+
+// Режимы пайплайна (День 23: реранкинг и фильтрация).
+const (
+	ModeBase   RAGMode = "base"   // поиск как есть, без этапа 2 и без rewrite
+	ModeFilter RAGMode = "filter" // этап 2 (фильтр по MinScore + реранк), без rewrite
+	ModeFull   RAGMode = "full"   // query rewrite + этап 2
+)
+
 // Answer — ответ LLM: текст + usage API + источники (для RAG-режима).
 type Answer struct {
-	Text    string
-	Usage   *llm.Result
-	Sources []Chunk // найденные чанки; nil — режим без RAG
-	Engine  string  // "sidecar" | "keyword"; пусто — без RAG
+	Text           string
+	Usage          *llm.Result
+	Sources        []Chunk // найденные чанки; nil — режим без RAG
+	Engine         string  // "sidecar" | "keyword"; пусто — без RAG
+	Stages         PipelineStages
+	Rewritten      bool   // запрос был переписан перед поиском
+	RewrittenQuery string // переписанный запрос (если применялся)
 }
 
 // ragSystemPrompt — инструкция для RAG-режима (источники обязательны).
@@ -74,13 +87,45 @@ func AnswerPlain(client *llm.Client, query string, maxTokens int) (*Answer, erro
 
 // AnswerRAG — «первый RAG-запрос»: ретрив top-k чанков → системный промпт
 // «контекст с источниками» → вопрос → ответ LLM со ссылками [n].
+//
+// Режим выбирается по конфигу: если rewrite.enabled — ModeFull, иначе ModeFilter.
 func AnswerRAG(ctx context.Context, client *llm.Client, retriever *Retriever, query string, maxTokens int) (*Answer, error) {
-	cfg := retriever.Config()
+	mode := ModeFilter
+	if retriever.Config().Rewrite.Enabled {
+		mode = ModeFull
+	}
+	return AnswerRAGWithMode(ctx, client, retriever, query, maxTokens, mode)
+}
 
-	result, err := retriever.Retrieve(ctx, query)
+// AnswerRAGWithMode выполняет RAG-ответ в заданном режиме пайплайна
+// (base | filter | full) — используется для сравнения качества в eval.
+func AnswerRAGWithMode(ctx context.Context, client *llm.Client, retriever *Retriever, query string, maxTokens int, mode RAGMode) (*Answer, error) {
+	cfg := retriever.Config()
+	q := strings.TrimSpace(query)
+	ans := &Answer{}
+
+	// Query rewrite (режим full — всегда; конфиг rewrite.enabled управляет
+	// только дефолтным AnswerRAG/SayRAG).
+	if mode == ModeFull {
+		if rewritten, ok := RewriteQuery(client, q, cfg.Rewrite.MaxTokens); ok && rewritten != q {
+			q = rewritten
+			ans.Rewritten = true
+			ans.RewrittenQuery = rewritten
+		}
+	}
+
+	// Ретрив: baseline (base) или полный пайплайн (filter/full).
+	var result *Result
+	var err error
+	if mode == ModeBase {
+		result, err = retriever.RetrieveRaw(ctx, q)
+	} else {
+		result, err = retriever.Retrieve(ctx, q)
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	contextText := BuildContext(result.Chunks, cfg.MaxContextChars)
 	if strings.TrimSpace(contextText) == "" {
 		return nil, fmt.Errorf("retrieve вернул пустой контекст (индекс пуст?)")
@@ -94,10 +139,11 @@ func AnswerRAG(ctx context.Context, client *llm.Client, retriever *Retriever, qu
 	if err != nil {
 		return nil, err
 	}
-	return &Answer{
-		Text:    res.Text,
-		Usage:   res,
-		Sources: result.Chunks,
-		Engine:  result.Engine,
-	}, nil
+
+	ans.Text = res.Text
+	ans.Usage = res
+	ans.Sources = result.Chunks
+	ans.Engine = result.Engine
+	ans.Stages = result.Stages
+	return ans, nil
 }

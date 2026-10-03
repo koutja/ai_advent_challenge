@@ -40,6 +40,10 @@ from config import load_config  # noqa: E402
 
 log = logging.getLogger("index_service")
 
+# Модель cross-encoder для реранкинга (/rerank) по умолчанию. Загружается
+# лениво и только по запросу; при недоступности клиент переходит на heuristic.
+DEFAULT_RERANK_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+
 
 class IndexService:
     """Обёртка над индексом: ленивая загрузка модели и бандла стратегии."""
@@ -52,6 +56,8 @@ class IndexService:
         self._bundle = None
         self._embed_cfg = emb
         self._bundle_loaded_at: float | None = None
+        self._cross: object | None = None  # sentence_transformers.CrossEncoder
+        self._cross_model = ""
 
     # --- ленивая инициализация ------------------------------------------------
 
@@ -94,6 +100,30 @@ class IndexService:
         }
 
     # --- поиск ----------------------------------------------------------------
+
+    # --- реранкинг (cross-encoder) ----------------------------------------------
+
+    def _ensure_cross(self, model: str) -> None:
+        """Ленивая загрузка CrossEncoder (модель скачивается с HF один раз)."""
+        if self._cross is not None and self._cross_model == model:
+            return
+        from sentence_transformers import CrossEncoder  # ленивый импорт
+
+        log.info("Загрузка cross-encoder реранкера: %s", model)
+        self._cross = CrossEncoder(model)
+        self._cross_model = model
+
+    def rerank(self, query: str, candidates: list[dict], model: str | None = None) -> list[float]:
+        """Скоры cross-encoder для пары (вопрос, чанк). Поднимает RuntimeError,
+        если модель недоступна — клиент (агент) перейдёт на heuristic-реранк."""
+        model = model or DEFAULT_RERANK_MODEL
+        self._ensure_cross(model)
+        pairs = [(query, str(c.get("text", ""))) for c in candidates]
+        if not pairs:
+            return []
+        return [float(s) for s in self._cross.predict(pairs, show_progress_bar=False)]
+
+    # --- поиск ------------------------------------------------------------------
 
     def search(self, query: str, top_k: int) -> dict:
         self._ensure()
@@ -163,7 +193,30 @@ class Handler(BaseHTTPRequestHandler):
         _send_json(self, 404, {"error": f"неизвестный путь: {self.path}"})
 
     def do_POST(self) -> None:  # noqa: N802 — имя из http.server
-        if self.path.split("?")[0] != "/search":
+        path = self.path.split("?")[0]
+
+        if path == "/rerank":
+            data = _read_json_body(self)
+            if data is None or not str(data.get("query", "")).strip():
+                _send_json(self, 400, {"error": "ожидается JSON-объект с полями query и candidates"})
+                return
+            candidates = data.get("candidates") or []
+            if not isinstance(candidates, list) or not candidates:
+                _send_json(self, 400, {"error": "candidates должен быть непустым списком"})
+                return
+            try:
+                scores = self.service.rerank(
+                    str(data["query"]),
+                    candidates,
+                    model=data.get("model"),
+                )
+                _send_json(self, 200, {"scores": scores})
+            except Exception as exc:  # noqa: BLE001 — модель недоступна
+                log.warning("cross-encoder реранкер недоступен: %s", exc)
+                _send_json(self, 501, {"error": f"cross-encoder недоступен: {exc}"})
+            return
+
+        if path != "/search":
             _send_json(self, 404, {"error": f"неизвестный путь: {self.path}"})
             return
         data = _read_json_body(self)
