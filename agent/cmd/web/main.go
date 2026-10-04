@@ -43,6 +43,7 @@ var (
 
 type chatReq struct {
 	Message string `json:"message"`
+	RAG     bool   `json:"rag"` // true → SayChat (RAG + память задачи + источники)
 }
 
 type strategyReq struct {
@@ -80,6 +81,20 @@ type chatResp struct {
 	Usage  *usageView              `json:"usage,omitempty"`
 	Stats  *statsView              `json:"stats,omitempty"`
 	Events []context.StrategyEvent `json:"events,omitempty"`
+
+	// --- День 25: RAG-чат с источниками и памятью задачи ---
+	Sources      []sourceView      `json:"sources,omitempty"`
+	Engine       string            `json:"engine,omitempty"`
+	Unknown      bool              `json:"unknown,omitempty"`
+	FormatOK     bool              `json:"format_ok,omitempty"`
+	SessionFacts map[string]string `json:"session_facts,omitempty"`
+	Goal         string            `json:"goal,omitempty"`
+}
+
+type sourceView struct {
+	Source  string  `json:"source"`
+	Section string  `json:"section"`
+	Score   float64 `json:"score"`
 }
 
 func main() {
@@ -132,6 +147,8 @@ func main() {
 	http.HandleFunc("/strategy", handleStrategy)
 	http.HandleFunc("/memory", handleMemory)
 	http.HandleFunc("/remember", handleRemember)
+	http.HandleFunc("/session", handleSession)
+	http.HandleFunc("/goal", handleGoal)
 	http.HandleFunc("/newtask", handleNewTask)
 	http.HandleFunc("/task", handleTask)
 	http.HandleFunc("/profile", handleProfile)
@@ -255,7 +272,13 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply, err := ag.Say(req.Message)
+	var reply *agent.Reply
+	var err error
+	if req.RAG {
+		reply, err = ag.SayChat(req.Message)
+	} else {
+		reply, err = ag.Say(req.Message)
+	}
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -266,6 +289,20 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	resp := chatResp{Reply: reply.Text}
 	if len(reply.Events) > 0 {
 		resp.Events = reply.Events
+	}
+	// RAG-чат: источники, движок, формат, память задачи.
+	if req.RAG {
+		resp.Engine = reply.Engine
+		resp.Unknown = reply.Unknown
+		resp.FormatOK = reply.FormatOK
+		if len(reply.Sources) > 0 {
+			resp.Sources = make([]sourceView, len(reply.Sources))
+			for i, s := range reply.Sources {
+				resp.Sources[i] = sourceView{Source: s.Source, Section: s.Section, Score: s.Score}
+			}
+		}
+		resp.Goal = ag.Goal()
+		resp.SessionFacts = ag.SessionFacts()
 	}
 	if reply.Usage != nil && reply.Usage.TotalTokens >= 0 {
 		resp.Usage = &usageView{
@@ -789,6 +826,38 @@ func handleNewTask(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleSession: GET — вернуть факты текущей сессии (память задачи: цель,
+// ограничения, термины, уточнения) для панели «Память задачи» в UI.
+func handleSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "ожидается GET", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"goal":  ag.Goal(),
+		"facts": ag.SessionFacts(),
+	})
+}
+
+// handleGoal: POST {"goal":"..."} — задать цель диалога (перезаписать).
+func handleGoal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "ожидается POST", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Goal string `json:"goal"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "неверный JSON: "+safeError(err), http.StatusBadRequest)
+		return
+	}
+	ag.SetGoal(req.Goal)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{"goal": ag.Goal()})
 }
 
 // taskView — JSON-представление состояния задачи для UI.

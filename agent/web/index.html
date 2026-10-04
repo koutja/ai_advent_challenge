@@ -183,6 +183,25 @@
     @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
     #themeToggle { background: transparent; color: var(--text); border: 1px solid var(--border); }
     #themeToggle:hover { background: var(--accent-soft); }
+
+    /* RAG-чат: блок источников под ответом */
+    .rag-sources {
+      margin: 2px 0 8px 32px; padding: 6px 10px;
+      border-left: 3px solid var(--accent, #4a9);
+      background: var(--bg-soft, rgba(255,255,255,0.04));
+      border-radius: 4px; font-size: 0.88em;
+    }
+    .rag-head { font-weight: 600; margin-bottom: 2px; }
+    .rag-engine { font-size: 0.85em; opacity: 0.7; font-weight: 400; }
+    .rag-unknown { color: #e85; font-weight: 400; }
+    .rag-warn { color: #e85; font-weight: 400; }
+    .rag-empty { opacity: 0.6; font-style: italic; }
+    .rag-list { margin: 2px 0 0; padding-left: 18px; }
+    .rag-list li { margin: 1px 0; }
+    .rag-score { font-size: 0.8em; opacity: 0.6; }
+    .rag-toggle { display: inline-flex; align-items: center; gap: 4px;
+      font-size: 0.85em; opacity: 0.85; cursor: pointer; user-select: none; }
+    .rag-toggle input { cursor: pointer; }
   </style>
 </head>
 <body>
@@ -222,6 +241,9 @@
       <div class="hint">Отправьте первое сообщение — оно начнёт задачу (цель = текст). Дальше шаги и этапы управляются кнопками под чатом (✎ ✓ → ✔ ↩ ⏸).</div>
       <form id="form">
         <input id="msg" type="text" placeholder="Сообщение..." autofocus>
+        <label class="rag-toggle" title="RAG: искать контекст по каждому вопросу и отвечать с источниками + памятью задачи">
+          <input type="checkbox" id="ragToggle"> RAG
+        </label>
         <button type="submit">Отправить</button>
       </form>
     </div>
@@ -257,6 +279,22 @@
           <div><span>Ответ</span><span id="sResponse">0</span></div>
           <div><span>Стоимость</span><span id="sCost">$0.000000</span></div>
         </div>
+      </div>
+    </aside>
+
+    <aside id="sessionPanel">
+      <h2>Память задачи (RAG-чат)</h2>
+      <div class="layer">
+        <div class="layer-head work">🎯 Цель диалога</div>
+        <div class="layer-body" id="sessionGoal"><span class="empty">не задана (первое сообщение = цель)</span></div>
+      </div>
+      <div class="layer">
+        <div class="layer-head work">📋 Факты сессии</div>
+        <div class="layer-body" id="sessionFacts"><span class="empty">пусто</span></div>
+      </div>
+      <div class="mem-actions">
+        <input id="goalInput" placeholder="новая цель диалога...">
+        <button id="goalSet" type="button" class="btn-secondary">🎯 Задать цель</button>
       </div>
     </aside>
 
@@ -602,6 +640,82 @@
         renderMemory(await resp.json());
       } catch (e) { /* игнорируем */ }
     }
+
+    // ---- RAG-чат: блок источников под ответом ассистента ----
+    function renderSources(sources, engine, formatOK, unknown) {
+      const div = document.createElement('div');
+      div.className = 'msg rag-sources';
+
+      let html = '<div class="rag-head">📚 Источники';
+      if (engine) html += ' <span class="rag-engine">[' + esc(engine) + ']</span>';
+      if (unknown) html += ' <span class="rag-unknown">⚠ не знаю</span>';
+      if (formatOK === false) html += ' <span class="rag-warn">⚠ формат</span>';
+      html += '</div>';
+
+      if (!sources || !sources.length) {
+        html += '<div class="rag-empty">источники не найдены</div>';
+      } else {
+        html += '<ul class="rag-list">';
+        for (const s of sources) {
+          let line = '<b>' + esc(s.source || '?') + '</b>';
+          if (s.section) line += ' — ' + esc(s.section);
+          if (s.score) line += ' <span class="rag-score">' + Number(s.score).toFixed(3) + '</span>';
+          html += '<li>' + line + '</li>';
+        }
+        html += '</ul>';
+      }
+      div.innerHTML = html;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    // ---- Панель «Память задачи»: цель + факты сессии ----
+    function renderSession(data) {
+      if (!data) return;
+      const goalEl = document.getElementById('sessionGoal');
+      const factsEl = document.getElementById('sessionFacts');
+      if (data.goal) {
+        goalEl.textContent = data.goal;
+        goalEl.classList.remove('empty');
+      } else {
+        goalEl.innerHTML = '<span class="empty">не задана (первое сообщение = цель)</span>';
+      }
+      const keys = Object.keys(data.facts || {});
+      if (keys.length === 0) {
+        factsEl.innerHTML = '<span class="empty">пусто</span>';
+      } else {
+        factsEl.innerHTML = keys.map(k =>
+          '<div class="fact"><b>' + esc(k) + ':</b> ' + esc(data.facts[k]) + '</div>'
+        ).join('');
+      }
+    }
+
+    async function loadSession() {
+      try {
+        const resp = await fetch('/session');
+        if (!resp.ok) return;
+        renderSession(await resp.json());
+      } catch (e) { /* игнорируем */ }
+    }
+
+    document.getElementById('goalSet').addEventListener('click', async () => {
+      const inp = document.getElementById('goalInput');
+      const goal = inp.value.trim();
+      if (!goal) { showToast('Введите цель диалога', 'warn'); return; }
+      try {
+        const resp = await fetch('/goal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ goal }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        inp.value = '';
+        await loadSession();
+        showToast('Цель диалога обновлена', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
 
     document.getElementById('memRemember').addEventListener('click', async () => {
       const kind = document.getElementById('memKind').value;
@@ -1122,6 +1236,7 @@
     loadStrategy();
     loadMemory();
     loadInvariants();
+    loadSession();
     refreshTask();
     route();
     applyBtn.addEventListener('click', applyStrategy);
@@ -1230,6 +1345,38 @@
         return;
       }
       add('user', text);
+
+      // RAG-чат: POST /chat {message, rag:true} — без SSE, с источниками и памятью задачи.
+      if (document.getElementById('ragToggle').checked) {
+        showTyping();
+        showWorking('Агент ищет контекст…');
+        try {
+          const resp = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, rag: true }),
+          });
+          if (!resp.ok) {
+            const e = await resp.json().catch(() => ({}));
+            throw new Error(e.error || ('HTTP ' + resp.status));
+          }
+          const d = await resp.json();
+          hideTyping();
+          hideWorking();
+          add('assistant', d.reply || '');
+          renderSources(d.sources, d.engine, d.format_ok, d.unknown);
+          if (d.stats) renderStats(d.stats);
+          loadSession();   // факты сессии могли измениться
+          loadMemory();    // short/working тоже
+        } catch (err) {
+          hideTyping();
+          hideWorking();
+          add('assistant', '[ошибка] ' + err.message);
+          showToast(err.message, 'error');
+        }
+        return;
+      }
+
       showTyping();
       showWorking('Агент думает…');
 

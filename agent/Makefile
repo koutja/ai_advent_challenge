@@ -1,4 +1,4 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-rag-modes run-rag-citations run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios run-web stop-web build-mcp-server build test reset-history
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -77,6 +77,17 @@ run-rag-modes:
 #   make run-rag-citations JUDGE=1
 run-rag-citations:
 	go run ./cmd/cli --rag-citations $(if $(JUDGE),--judge,)
+
+# ===== Мини-чат с RAG + памятью задачи (День 25) =====
+# REPL: каждое сообщение → SayChat (ретрив контекста + история + память задачи
+# + строгий формат с источниками). Команды: /goal, /facts, /reset, /exit.
+run-chat:
+	go run ./cmd/cli --chat
+
+# Прогон 2 длинных сценариев (10-15 реплик) с автопроверкой: источники,
+# формат, факты, «цель не потеряна». Отчёт: results/chat_scenarios.md.
+run-chat-scenarios:
+	go run ./cmd/cli --chat-scenarios
 
 # ===== Сборка автономного MCP-сервера (отдельный процесс) в bin/ =====
 build-mcp-server:

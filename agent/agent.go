@@ -4,6 +4,7 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"aichallenge/llm"
@@ -435,6 +436,175 @@ func (a *Agent) SayRAG(input string) (*Reply, error) {
 		Text:     ans.Text,
 		Usage:    ans.Usage,
 		Stats:    st,
+		Sources:  ans.Sources,
+		Engine:   ans.Engine,
+		Unknown:  ans.Unknown,
+		Citation: ans.Citation,
+		FormatOK: ans.FormatOK,
+	}, nil
+}
+
+// Goal возвращает цель текущего диалога из рабочего слоя памяти (пусто — не задана).
+func (a *Agent) Goal() string {
+	if a.memory == nil {
+		return ""
+	}
+	g, _ := a.memory.Working().Get("goal")
+	return g
+}
+
+// SetGoal явно задаёт цель диалога (команда /goal в CLI, поле в вебе).
+// Перезаписывает ранее установленную цель.
+func (a *Agent) SetGoal(text string) {
+	if a.memory == nil {
+		return
+	}
+	a.memory.Working().Set("goal", strings.TrimSpace(text))
+}
+
+// SessionFacts возвращает все факты текущего диалога из рабочего слоя памяти
+// (цель, ограничения, термины, уточнения) — для отображения в панели «Память задачи».
+func (a *Agent) SessionFacts() map[string]string {
+	if a.memory == nil {
+		return map[string]string{}
+	}
+	return a.memory.Working().All()
+}
+
+// extraSystemBlocks собирает system-блоки памяти/инвариантов/профиля/FSM в порядке
+// приоритета (жёсткие правила — первыми) для инъекции в запрос SayChat. Порядок
+// совпадает с prepareMessages: инварианты → профиль → FSM → long → working.
+func (a *Agent) extraSystemBlocks() []llm.Message {
+	var out []llm.Message
+	if a.invariants != nil {
+		if b := a.invariants.SystemBlock(); b != "" {
+			out = append(out, llm.Message{Role: "system", Content: b})
+		}
+	}
+	if a.activeProfile != nil {
+		if b := a.activeProfile.SystemBlock(); b != "" {
+			out = append(out, llm.Message{Role: "system", Content: b})
+		}
+	}
+	if a.tasks != nil {
+		if b := a.tasks.SystemBlock(); b != "" {
+			out = append(out, llm.Message{Role: "system", Content: b})
+		}
+	}
+	if a.memory != nil {
+		if b := a.memory.LongSystem(); b != "" {
+			out = append(out, llm.Message{Role: "system", Content: b})
+		}
+		if b := a.memory.WorkingSystem(); b != "" {
+			out = append(out, llm.Message{Role: "system", Content: b})
+		}
+	}
+	return out
+}
+
+// SayChat — мини-чат с RAG + памятью (День 25, production-like).
+//
+// В отличие от SayRAG (stateless — только вопрос + контекст), SayChat подмешивает
+// историю диалога и слои памяти (цель, ограничения, термины — рабочий слой), а
+// в отличие от Say — каждый ход заново ищет контекст по текущему вопросу и
+// отвечает в строгом формате Дня 24 (Ответ/Источники/Цитаты) с источниками.
+//
+// Поток:
+//  1. авто-цель: если goal не задан → goal = первое сообщение (обрезка ~200 симв.);
+//  2. ретрив + жёсткий гейт «не знаю» (без LLM при слабом контексте);
+//  3. сборка: [инварианты/профиль/FSM/память] → [RAG-контекст] → история → вопрос;
+//  4. LLM (строгий промпт) → ParseCitation + ValidateSources/ValidateQuotes;
+//  5. сохранение хода в short-слой + роутинг фактов в рабочий слой.
+func (a *Agent) SayChat(input string) (*Reply, error) {
+	if a.memory == nil {
+		return nil, errors.New("нет памяти (Memory не задана)")
+	}
+	if a.rag == nil {
+		return nil, errors.New("RAG не настроен: добавьте секцию rag в config.json")
+	}
+	if input == "" {
+		return nil, errors.New("пустое сообщение")
+	}
+
+	// Сбрасываем буфер событий текущего хода.
+	a.mu.Lock()
+	a.currentEvents = nil
+	a.mu.Unlock()
+
+	// Авто-цель: если goal не задан — фиксируем первое сообщение как цель диалога.
+	if g := a.Goal(); g == "" {
+		goalText := strings.TrimSpace(input)
+		if r := []rune(goalText); len(r) > 200 {
+			goalText = string(r[:200])
+		}
+		a.SetGoal(goalText)
+		a.emitEvent(context.StrategyEvent{Kind: context.EventLog,
+			Text: "память задачи: цель диалога зафиксирована → " + a.Goal()})
+	}
+
+	// История диалога (через активную стратегию, как в Say).
+	hist, err := a.strategyHist()
+	if err != nil {
+		return nil, err
+	}
+
+	// System-блоки памяти/инвариантов/профиля/FSM — ПЕРЕД RAG-контекстом.
+	extraSystem := a.extraSystemBlocks()
+
+	ans, err := rag.AnswerRAGWithHistory(stdctx.Background(), a.client, a.rag, hist, extraSystem, input, a.cfg.MaxTokens)
+	if err != nil {
+		return nil, err
+	}
+
+	// Сохраняем ход в short-слой (как в Say).
+	userMsg := llm.Message{Role: "user", Content: input}
+	assistMsg := llm.Message{Role: "assistant", Content: ans.Text}
+	if a.strategy == nil || a.strategy.Name() != "branch" {
+		_ = a.memory.Short().Append(userMsg)
+		_ = a.memory.Short().Append(assistMsg)
+	}
+
+	// Роутинг фактов из реплики пользователя → рабочий слой (ограничения/термины).
+	if added := a.memory.RouteUserTurn(input, a.extractor); added > 0 {
+		a.emitEvent(context.StrategyEvent{Kind: context.EventLog,
+			Text: fmt.Sprintf("память задачи: %d новых фактов → рабочий слой", added)})
+	}
+
+	// Даём стратегии обновить состояние после хода.
+	if a.strategy != nil {
+		observeHist, _ := a.strategyHist()
+		if a.strategy.Name() == "branch" {
+			observeHist = append(cloneAgentMsgs(observeHist), userMsg, assistMsg)
+		}
+		_ = a.strategy.Observe(observeHist)
+	}
+
+	a.mu.Lock()
+	events := append([]context.StrategyEvent{}, a.currentEvents...)
+	a.mu.Unlock()
+
+	st := &TokenStats{Model: a.client.Model(), ContextWindow: a.cfg.ContextWindow}
+	if ans.Usage != nil {
+		if ans.Usage.PromptTokens >= 0 {
+			st.RequestTokens = ans.Usage.PromptTokens
+		}
+		if ans.Usage.CompletionTokens >= 0 {
+			st.ResponseTokens = ans.Usage.CompletionTokens
+		}
+		if ans.Usage.TotalTokens >= 0 {
+			st.TotalTokens = ans.Usage.TotalTokens
+		}
+		if p, ok := a.prices[ans.Usage.Model]; ok {
+			st.CostUSD = Cost(p, ans.Usage.PromptTokens, ans.Usage.CompletionTokens)
+			st.CostKnown = true
+		}
+	}
+
+	return &Reply{
+		Text:     ans.Text,
+		Usage:    ans.Usage,
+		Stats:    st,
+		Events:   events,
 		Sources:  ans.Sources,
 		Engine:   ans.Engine,
 		Unknown:  ans.Unknown,

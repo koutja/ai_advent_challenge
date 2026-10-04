@@ -450,6 +450,48 @@ make run-rag-citations JUDGE=1       # + LLM-as-judge (смысловое соо
 срабатывает на всех внекорпусных вопросах (3/3) без ложных срабатываний на
 корпусных. LLM-as-judge подтверждает смысловое соответствие в 8/11 случаев.
 
+### День 25: мини-чат с RAG + памятью задачи (production-like)
+
+Многоходовый диалог, в котором агент на каждый вопрос ищет контекст через RAG,
+отвечает с источниками и не теряет цель на протяжении 10–15 реплик.
+
+**Гибридный метод [`SayChat()`](agent/agent.go:505)** объединяет возможности
+[`Say()`](agent/agent.go:394) (история диалога + многослойная память + FSM +
+инварианты) и [`SayRAG()`](agent/agent.go:410) (ретрив + строгий формат Дня 24
+с источниками и цитатами):
+
+1. **Авто-цель**: первое сообщение пользователя → `Working().Set("goal", …)`
+   (обрезка до 200 рун). Переопределить — `/goal` в CLI или поле в web.
+2. **Сборка системных блоков** [`extraSystemBlocks()`](agent/agent.go:477):
+   инварианты → профиль → FSM → long → working — инъекция **до** RAG-контекста.
+3. **RAG с историей** [`AnswerRAGWithHistory()`](agent/feature/rag/chat.go:1):
+   ретрив → hard-гейт «не знаю» → сборка `[extraSystem → system+context →
+   history → query]` → LLM → ParseCitation + ValidateSources/Quotes + soft-гейт.
+4. **Роутинг фактов** [`RouteUserTurn()`](agent/feature/memory/extract.go:1):
+   LLM-экстрактор извлекает ограничения, термины, уточнения → `Working()`.
+5. **Reply** с `Sources`, `Citation`, `Unknown`, `FormatOK`, `SessionFacts`.
+
+**Память задачи** — лёгкий session-слой поверх `Working()` (без новой БД, без
+FSM): ключ `goal` + авто-извлечённые факты (constraint/term/clarification).
+Рендерится как системный блок через [`WorkingSystem()`](agent/feature/memory/layered.go:126).
+
+**Сценарии** [`chat_scenarios.json`](agent/chat_scenarios.json:1) — 2 сценария
+по 10–11 реплик, каждый с `goal`, `goal_keywords` и ожидаемыми фактами/
+источниками на ход. Автопроверка: источники есть, формат OK, факт-покрытие,
+«цель не потеряна» (majority-match `goalKeywordsHit` — устойчив к русской
+морфологии: «день» ≠ «дня»). Отчёт: `results/chat_scenarios.md`.
+
+```bash
+make run-chat            # CLI REPL: /goal, /facts, /reset, /exit
+make run-chat-scenarios  # 2 сценария → results/chat_scenarios.md
+make run-web             # web: RAG-тумблер + блок источников + панель «Память задачи»
+```
+
+В web-интерфейсе: чекбокс **RAG** в форме → `POST /chat {rag:true}` (без SSE) →
+ответ с `sources`/`engine`/`unknown`/`format_ok`/`session_facts`/`goal`.
+Панель «Память задачи» (`/session`) показывает цель и факты сессии, поле
+«Задать цель» → `POST /goal`.
+
 ## Стратегии управления контекстом
 
 Подробный дизайн — в [`plans/context-management-plan.md`](plans/context-management-plan.md),

@@ -50,6 +50,8 @@ func main() {
 	ragJudge := flag.Bool("judge", false, "добавить LLM-as-judge к --rag-eval")
 	ragModes := flag.Bool("rag-modes", false, "сравнить режимы пайплайна: base/filter/full (results/rag_modes_comparison.md)")
 	ragCitations := flag.Bool("rag-citations", false, "проверить обязательные источники/цитаты + режим «не знаю» (results/rag_citations.md)")
+	chatMode := flag.Bool("chat", false, "мини-чат с RAG + памятью задачи: REPL, каждый ход ищет контекст и отвечает с источниками")
+	chatScenarios := flag.Bool("chat-scenarios", false, "прогнать 2 длинных сценария мини-чата с автопроверкой (results/chat_scenarios.md)")
 	flag.Parse()
 
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -93,6 +95,16 @@ func main() {
 	}
 	if *ragCitations {
 		runRAGCitations(cfg, *ragJudge)
+		return
+	}
+
+	// --- Мини-чат с RAG + памятью (День 25) ---
+	if *chatScenarios {
+		runChatScenarios(cfg)
+		return
+	}
+	if *chatMode {
+		runChat(cfg)
 		return
 	}
 

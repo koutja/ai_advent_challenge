@@ -1,0 +1,236 @@
+{
+  "scenarios": [
+    {
+      "id": "s01",
+      "title": "Настроить RAG в новом дне",
+      "goal": "Разобраться, как подключить RAG и пакет llm к новому дню репозитория",
+      "goal_keywords": [
+        "rag",
+        "llm",
+        "день"
+      ],
+      "turns": [
+        {
+          "message": "Хочу добавить RAG в новый день проекта. С чего начать?",
+          "expect": [
+            "llm",
+            "go.mod"
+          ],
+          "sources_expected": [
+            ".agents/skills/create-day/SKILL.md"
+          ]
+        },
+        {
+          "message": "Как именно подключить общий пакет llm в go.mod нового дня?",
+          "expect": [
+            "replace aichallenge/llm",
+            "require"
+          ],
+          "sources_expected": [
+            ".agents/skills/create-day/SKILL.md"
+          ]
+        },
+        {
+          "message": "Какие переменные окружения нужны для работы пакета llm?",
+          "expect": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL"
+          ],
+          "sources_expected": [
+            "llm/llm.go"
+          ]
+        },
+        {
+          "message": "А как загружается .env — каскадом или одним файлом?",
+          "expect": [
+            "каскад",
+            ".env"
+          ],
+          "sources_expected": [
+            "llm/llm.go"
+          ]
+        },
+        {
+          "message": "Где живёт индекс для RAG и как его собрать?",
+          "expect": [
+            "index_service",
+            "index"
+          ],
+          "sources_expected": [
+            "index_service/README.md"
+          ]
+        },
+        {
+          "message": "Как запустить микросервис поиска по индексу?",
+          "expect": [
+            "serve",
+            "make"
+          ],
+          "sources_expected": [
+            "index_service/README.md"
+          ]
+        },
+        {
+          "message": "Какие параметры RAG настраиваются в config.json агента?",
+          "expect": [
+            "top_k",
+            "min_score"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Что такое порог unknown_below и зачем он нужен?",
+          "expect": [
+            "не знаю",
+            "unknown"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Как агент проверяет, что цитаты в ответе дословные?",
+          "expect": [
+            "дословн",
+            "цитат"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Итого: какие шаги нужны, чтобы новый день получил RAG с источниками?",
+          "expect": [
+            "llm",
+            "rag",
+            "источник"
+          ],
+          "sources_expected": []
+        }
+      ]
+    },
+    {
+      "id": "s02",
+      "title": "Сравнить стратегии контекста агента",
+      "goal": "Понять стратегии управления контекстом агента и выбрать подходящую",
+      "goal_keywords": [
+        "стратег",
+        "контекст",
+        "window"
+      ],
+      "turns": [
+        {
+          "message": "Какие стратегии управления контекстом есть у агента?",
+          "expect": [
+            "window",
+            "facts",
+            "branch"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Чем стратегия window отличается от facts?",
+          "expect": [
+            "window",
+            "facts"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "А что такое branch — ветвление диалога?",
+          "expect": [
+            "branch",
+            "ветв"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Как переключить стратегию в CLI?",
+          "expect": [
+            "strategy",
+            "window"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Какие параметры у стратегии facts — сколько фактов хранится?",
+          "expect": [
+            "facts_keep_last",
+            "facts_key_max"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Чем facts_extractor llm отличается от heuristic?",
+          "expect": [
+            "llm",
+            "heuristic"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Как проверить стратегии на сценарии — есть сравнение?",
+          "expect": [
+            "compare",
+            "стратег"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Что показывает сравнение стратегий — какие метрики?",
+          "expect": [
+            "токен",
+            "точн"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Какая стратегия по умолчанию в config.json?",
+          "expect": [
+            "window"
+          ],
+          "sources_expected": [
+            "agent/config.json"
+          ]
+        },
+        {
+          "message": "Как сбросить контекст и начать новый диалог?",
+          "expect": [
+            "reset",
+            "нов"
+          ],
+          "sources_expected": [
+            "agent/README.md"
+          ]
+        },
+        {
+          "message": "Итого: какую стратегию выбрать для длинного диалога с фактами?",
+          "expect": [
+            "facts",
+            "стратег"
+          ],
+          "sources_expected": []
+        }
+      ]
+    }
+  ]
+}
