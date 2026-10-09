@@ -1,8 +1,20 @@
-.PHONY: run run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios run-web stop-web build-mcp-server build test reset-history
+.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build test reset-history
+
+# ===== Локальная LLM (День 27) =====
+# Подключение к локальной модели через Ollama (OpenAI-совместимый эндпоинт).
+# Инлайн env имеет приоритет над каскадом .env (llm.LoadEnv не перезаписывает
+# уже заданные переменные), поэтому цели работают даже без agent/.env.
+# Модель можно переопределить: make run-local MODEL=qwen2.5:3b
+MODEL ?= qwen2.5:0.5b
+LOCAL_ENV := LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=$(MODEL) LLM_API_KEY=ollama
 
 # ===== Консольный интерфейс (REPL) =====
 run:
 	go run ./cmd/cli
+
+# ===== Консольный интерфейс на ЛОКАЛЬНОЙ модели (без облака, День 27) =====
+run-local:
+	$(LOCAL_ENV) go run ./cmd/cli --config config.local.json
 
 # ===== Сравнение токенов (Этап 3): короткий/длинный/переполненный диалог =====
 run-stats:
@@ -97,6 +109,10 @@ build-mcp-server:
 # ===== Веб-интерфейс (опционально) =====
 run-web:
 	go run ./cmd/web
+
+# ===== Веб-интерфейс на ЛОКАЛЬНОЙ модели (без облака, День 27) =====
+run-web-local:
+	$(LOCAL_ENV) go run ./cmd/web --config config.local.json
 
 # Остановить ранее запущенный web-сервер (по порту из config.json: web_addr).
 # `go run` компилирует бинарник во временную папку, поэтому гасим процесс,

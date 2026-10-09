@@ -1,0 +1,27 @@
+{
+  "history_file": "agent_history.db",
+  "long_memory_file": "agent_longterm.db",
+  "profile_file": "agent_profiles.db",
+  "active_profile": "",
+  "task_file": "agent_task.db",
+  "invariants_file": "agent_invariants.db",
+  "keep_last": 10,
+  "summarize_after": 10,
+  "compress": true,
+  "max_tokens": 0,
+  "context_window": 32768,
+  "web_addr": "127.0.0.1:8080",
+  "web_dir": "web",
+  "context_strategy": "window",
+  "window_size": 10,
+  "facts_keep_last": 10,
+  "facts_key_max": 50,
+  "facts_extractor": "heuristic",
+  "mcp_command": "bin/mcp-server",
+  "mcp_servers": [
+    { "name": "tasks", "command": "bin/mcp-server", "args": ["--server", "tasks"] },
+    { "name": "scheduler", "command": "bin/mcp-server", "args": ["--server", "scheduler"] },
+    { "name": "knowledge", "command": "bin/mcp-server", "args": ["--server", "knowledge"] }
+  ],
+  "rag": null
+}

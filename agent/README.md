@@ -674,6 +674,49 @@ REPL-команды управления: `/invariants` (список), `/invari
 `POST /invariants` (добавить), `POST /invariants/delete` (удалить по `id`). Дизайн — в
 [`plans/invariants-plan.md`](plans/invariants-plan.md).
 
+## Локальная LLM (День 27)
+
+Агент работает **полностью без облачных моделей** — через локальную LLM в Ollama
+(OpenAI-совместимый эндпоинт `http://localhost:11434/v1`). Код агента не меняется:
+подключение и так берётся из env-каскада ([`llm.New()`](../llm/llm.go) в ядре,
+MCP и RAG), достаточно указать локальный endpoint.
+
+**Требования:** установленный и запущенный Ollama + модель:
+
+```bash
+brew install ollama && brew services start ollama
+ollama pull qwen2.5:0.5b   # ~397 МБ; можно любую другую: make run-local MODEL=qwen2.5:3b
+```
+
+**Запуск на локальной модели:**
+
+```bash
+cd agent
+
+make run-local      # CLI (REPL) на локальной модели + config.local.json
+make run-web-local  # Web-интерфейс (http://127.0.0.1:8080) на локальной модели
+```
+
+Как это устроено:
+
+- локальный `agent/.env` (gitignored) указывает `LLM_BASE_URL=http://localhost:11434/v1`,
+  `LLM_MODEL=qwen2.5:0.5b`, `LLM_API_KEY=ollama` (заглушка — Ollama ключ не проверяет).
+  Каскад читает `agent/.env` **первым**, поэтому он приоритетнее корневого `.env`
+  с облачными настройками: дефолтные `make run` / `make run-web` тоже идут в локальную модель;
+- цели `run-local` / `run-web-local` задают те же переменные инлайн (инлайн env сильнее
+  любого `.env`), поэтому работают даже без `agent/.env`. Модель переопределяется:
+  `make run-local MODEL=qwen2.5:3b`;
+- [`config.local.json`](config.local.json) — профиль под маленькую локальную модель:
+  `facts_extractor: "heuristic"` (0.5b ненадёжно выдаёт JSON для извлечения фактов),
+  RAG выключен (полностью автономный режим без sidecar-сервиса), `context_window: 32768`
+  (реальное окно qwen2.5). Сложные JSON-фичи (авто-план задачи `/begin`, `/validate`)
+  на крошечной модели работают нестабильно — это ожидаемо;
+- стоимость в статистике показывается как «—»: локальной модели нет в
+  [`../llm/models.json`](../llm/models.json), токены при этом считаются как обычно.
+
+Проверка (Day 27): CLI отвечает на сообщение с локальной моделью; web `POST /chat`
+возвращает JSON с `"stats": {"model": "qwen2.5:0.5b", ...}`; ответ отображается в UI.
+
 ## Настройка (куда идут запросы и ключи)
 
 Подключение к LLM задаётся **только** через переменные окружения (стандартные
