@@ -1,4 +1,4 @@
-.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build test reset-history
+.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build test reset-history
 
 # ===== Локальная LLM (День 27) =====
 # Подключение к локальной модели через Ollama (OpenAI-совместимый эндпоинт).
@@ -7,6 +7,8 @@
 # Модель можно переопределить: make run-local MODEL=qwen2.5:3b
 MODEL ?= qwen2.5:0.5b
 LOCAL_ENV := LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=$(MODEL) LLM_API_KEY=ollama
+# Число прогонов на вопрос в сравнении локальной и облачной моделей (стабильность).
+RAG_RUNS ?= 3
 
 # ===== Консольный интерфейс (REPL) =====
 run:
@@ -73,6 +75,22 @@ run-mcp-orchestrate:
 # Пример: make run-rag QUERY="как подключить пакет llm"
 run-rag:
 	go run ./cmd/cli --rag "$(QUERY)"
+
+# ===== Локальный RAG (День 28): retrieval локальный + генерация на локальной модели =====
+# Одиночный RAG-ответ локальной моделью. Пример:
+#   make run-rag-local QUERY="как подключить пакет llm"
+run-rag-local:
+	$(LOCAL_ENV) go run ./cmd/cli --config config.local.json --rag "$(QUERY)"
+
+# Сравнение RAG-ответов локальной и облачной моделей на контрольных вопросах.
+# Отчёт: agent/results/rag_local_vs_cloud.md.
+# Облачные настройки (секреты НЕ коммитятся) берутся из корневого ../.env и
+# переэкспортируются под именами LLM_CLOUD_*; если ../.env нет — отчёт только
+# по локальной модели. Локальную модель можно переопределить: MODEL=qwen2.5:3b.
+run-rag-local-vs-cloud:
+	@bash -c 'set -a; [ -f ../.env ] && . ../.env; set +a; \
+	export LLM_CLOUD_BASE_URL="$$LLM_BASE_URL" LLM_CLOUD_API_KEY="$$LLM_API_KEY" LLM_CLOUD_MODEL="$$LLM_MODEL"; \
+	$(LOCAL_ENV) go run ./cmd/cli --config config.local.json --rag-local-vs-cloud --rag-runs $(RAG_RUNS)'
 
 # Сравнение качества: без RAG vs с RAG на 10 контрольных вопросах.
 # Отчёт: agent/results/rag_comparison.md. Опционально добавить LLM-as-judge:
