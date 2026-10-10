@@ -885,6 +885,18 @@ make service-stop      # остановить (модель выгружаетс
 
 Состояние: `launchctl list | grep aichallenge`, логи — `/tmp/aichallenge-*.log`.
 
+**Минимальный вариант без LaunchAgents** — ничего не меняет в системе, процессы
+переживают закрытие терминала, но не перезагрузку Mac:
+
+```bash
+cd agent
+make service-detach        # собрать bin/agent-web и запустить фоном (nohup)
+make service-detach-stop   # остановить фоновый агент
+
+# Если нужно открыть Ollama в сеть вручную (тоже фоном, без GUI-приложения):
+#   OLLAMA_HOST=0.0.0.0 nohup ollama serve >/tmp/ollama.log 2>&1 &
+```
+
 ## Настройка (куда идут запросы и ключи)
 
 Подключение к LLM задаётся **только** через переменные окружения (стандартные

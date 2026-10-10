@@ -1,4 +1,4 @@
-.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build-web service-install service-stop build test reset-history
+.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build-web service-install service-stop service-detach service-detach-stop build test reset-history
 
 # ===== Локальная LLM (День 27) =====
 # Подключение к локальной модели через Ollama (OpenAI-совместимый эндпоинт).
@@ -183,6 +183,22 @@ service-stop:
 	launchctl unload ~/Library/LaunchAgents/aichallenge.ollama.plist 2>/dev/null || true
 	launchctl unload ~/Library/LaunchAgents/aichallenge.agent-web.plist 2>/dev/null || true
 	@echo "Сервисы остановлены. Запустить снова: make service-install"
+
+# ===== Минимальный вариант (без LaunchAgents, ничего не меняет в системе) =====
+# Фоновый запуск через nohup: переживает закрытие терминала, но НЕ перезагрузку.
+# Предполагается, что Ollama уже работает (приложение в меню-баре или вручную).
+# Если нужно открыть Ollama в сеть вручную (тоже фоном):
+#   OLLAMA_HOST=0.0.0.0 nohup ollama serve >/tmp/ollama.log 2>&1 &
+service-detach: build-web
+	@nohup bin/agent-web --config config.service.json >/tmp/aichallenge-agent-web.log 2>&1 &
+	@sleep 3
+	@curl -s -m 5 http://127.0.0.1:8080/ -o /dev/null -w "web-агент: HTTP %{http_code}\n"
+	@echo "Адрес с телефона: http://$$(ipconfig getifaddr en0):8080 | лог: /tmp/aichallenge-agent-web.log"
+
+# Остановить фоновый web-агент (Ollama не трогается — ею управляет приложение).
+service-detach-stop:
+	@pkill -x agent-web 2>/dev/null || true
+	@echo "Фоновый web-агент остановлен."
 
 build-web:
 	mkdir -p bin
