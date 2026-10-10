@@ -1,0 +1,8 @@
+# Day 29 — вариант с более точным квантованием весов (q8_0 вместо q4_K_M):
+# меньше ошибок округления весов → заметно лучше следование формату и точность
+# у крошечной модели; цена — +~35% размера и чуть медленнее генерация.
+# Создание: ollama create qwen2.5:0.5b-q8-opt -f agent/ollama/qwen2.5-0.5b-q8-opt.Modelfile
+FROM qwen2.5:0.5b-instruct-q8_0
+PARAMETER num_ctx 8192
+PARAMETER temperature 0.2
+PARAMETER top_p 0.8

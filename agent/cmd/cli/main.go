@@ -51,7 +51,8 @@ func main() {
 	ragModes := flag.Bool("rag-modes", false, "сравнить режимы пайплайна: base/filter/full (results/rag_modes_comparison.md)")
 	ragCitations := flag.Bool("rag-citations", false, "проверить обязательные источники/цитаты + режим «не знаю» (results/rag_citations.md)")
 	ragLocalVsCloud := flag.Bool("rag-local-vs-cloud", false, "сравнить RAG-ответы локальной и облачной модели (results/rag_local_vs_cloud.md)")
-	ragRuns := flag.Int("rag-runs", 3, "прогонов на вопрос для оценки стабильности локальной модели")
+	ragOptimize := flag.Bool("rag-optimize", false, "бенчмарк вариантов оптимизации локальной LLM под RAG-кейс (results/rag_optimization.md)")
+	ragRuns := flag.Int("rag-runs", 3, "прогонов на вопрос для оценки стабильности/оптимизации")
 	chatMode := flag.Bool("chat", false, "мини-чат с RAG + памятью задачи: REPL, каждый ход ищет контекст и отвечает с источниками")
 	chatScenarios := flag.Bool("chat-scenarios", false, "прогнать 2 длинных сценария мини-чата с автопроверкой (results/chat_scenarios.md)")
 	flag.Parse()
@@ -103,6 +104,12 @@ func main() {
 	// --- Локальный RAG (День 28): сравнение локальной и облачной моделей ---
 	if *ragLocalVsCloud {
 		runRAGLocalVsCloud(cfg, *ragRuns)
+		return
+	}
+
+	// --- Оптимизация локальной LLM (День 29): бенчмарк вариантов ---
+	if *ragOptimize {
+		runRAGOptimize(cfg, *ragRuns)
 		return
 	}
 

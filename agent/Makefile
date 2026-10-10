@@ -1,11 +1,12 @@
-.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build test reset-history
+.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build test reset-history
 
 # ===== Локальная LLM (День 27) =====
 # Подключение к локальной модели через Ollama (OpenAI-совместимый эндпоинт).
 # Инлайн env имеет приоритет над каскадом .env (llm.LoadEnv не перезаписывает
 # уже заданные переменные), поэтому цели работают даже без agent/.env.
-# Модель можно переопределить: make run-local MODEL=qwen2.5:3b
-MODEL ?= qwen2.5:0.5b
+# Модель по умолчанию — победитель бенчмарка Дня 29 (равное качество, быстрее,
+# стабильнее cold start). Переопределяется: make run-local MODEL=qwen2.5:3b
+MODEL ?= qwen2.5:0.5b-opt
 LOCAL_ENV := LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=$(MODEL) LLM_API_KEY=ollama
 # Число прогонов на вопрос в сравнении локальной и облачной моделей (стабильность).
 RAG_RUNS ?= 3
@@ -91,6 +92,19 @@ run-rag-local-vs-cloud:
 	@bash -c 'set -a; [ -f ../.env ] && . ../.env; set +a; \
 	export LLM_CLOUD_BASE_URL="$$LLM_BASE_URL" LLM_CLOUD_API_KEY="$$LLM_API_KEY" LLM_CLOUD_MODEL="$$LLM_MODEL"; \
 	$(LOCAL_ENV) go run ./cmd/cli --config config.local.json --rag-local-vs-cloud --rag-runs $(RAG_RUNS)'
+
+# ===== Оптимизация локальной LLM (День 29) =====
+# Создать оптимизированные варианты модели (параметры запечены в Modelfile):
+#   num_ctx 8192 (без усечения RAG-контекста), temperature 0.2, top_p 0.8.
+# Для q8-варианта предварительно: ollama pull qwen2.5:0.5b-instruct-q8_0
+opt-create:
+	ollama create qwen2.5:0.5b-opt -f ollama/qwen2.5-0.5b-opt.Modelfile
+	ollama create qwen2.5:0.5b-q8-opt -f ollama/qwen2.5-0.5b-q8-opt.Modelfile
+
+# Бенчмарк «до/после»: baseline / параметры / +промпт / квант q8.
+# Отчёт: agent/results/rag_optimization.md. Прогоны: RAG_RUNS=2.
+run-rag-optimize:
+	$(LOCAL_ENV) go run ./cmd/cli --config config.local.json --rag-optimize --rag-runs $(RAG_RUNS)
 
 # Сравнение качества: без RAG vs с RAG на 10 контрольных вопросах.
 # Отчёт: agent/results/rag_comparison.md. Опционально добавить LLM-as-judge:

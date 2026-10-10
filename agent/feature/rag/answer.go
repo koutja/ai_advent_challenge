@@ -152,10 +152,14 @@ func AnswerRAGWithMode(ctx context.Context, client *llm.Client, retriever *Retri
 		return nil, fmt.Errorf("retrieve вернул пустой контекст (индекс пуст?)")
 	}
 
-	// Промпт: строгий формат с цитатами (День 24) либо базовый (День 22/23).
+	// Промпт: override из конфига (День 29 — оптимизация под локальную модель),
+	// иначе строгий формат с цитатами (День 24) либо базовый (День 22/23).
 	system := ragSystemPrompt
 	if cfg.CitationsRequired {
 		system = citeSystemPrompt
+	}
+	if strings.TrimSpace(cfg.SystemPrompt) != "" {
+		system = cfg.SystemPrompt
 	}
 	msgs := []llm.Message{
 		{Role: "system", Content: system + "\n\nКонтекст:\n" + contextText},

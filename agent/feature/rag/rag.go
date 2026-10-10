@@ -57,13 +57,14 @@ type RewriteConfig struct {
 
 // Config — настройки ретривера (не секретные; LLM-подключение не трогаем).
 type Config struct {
-	Enabled         bool   `json:"enabled"`           // false — RAG выключен
-	SidecarURL      string `json:"sidecar_url"`       // базовый URL микросервиса index_service
-	IndexDir        string `json:"index_dir"`         // папка индексов, напр. ../index_service/index
-	Strategy        string `json:"strategy"`          // fixed | structure
-	TopK            int    `json:"top_k"`             // сколько чанков брать из индекса (legacy-алиас для TopKFetch)
-	MaxContextChars int    `json:"max_context_chars"` // лимит символов контекста для промпта
-	TimeoutSeconds  int    `json:"timeout_seconds"`   // таймаут обращения к сайдкару
+	Enabled         bool   `json:"enabled"`                 // false — RAG выключен
+	SystemPrompt    string `json:"system_prompt,omitempty"` // override системного промпта (День 29: оптимизация под локальную модель); пусто — встроенный
+	SidecarURL      string `json:"sidecar_url"`             // базовый URL микросервиса index_service
+	IndexDir        string `json:"index_dir"`               // папка индексов, напр. ../index_service/index
+	Strategy        string `json:"strategy"`                // fixed | structure
+	TopK            int    `json:"top_k"`                   // сколько чанков брать из индекса (legacy-алиас для TopKFetch)
+	MaxContextChars int    `json:"max_context_chars"`       // лимит символов контекста для промпта
+	TimeoutSeconds  int    `json:"timeout_seconds"`         // таймаут обращения к сайдкару
 
 	// --- Этап 2: фильтрация и реранкинг (День 23) ---
 	TopKFetch     int     `json:"top_k_fetch"`    // сколько чанков берём из индекса ДО фильтрации

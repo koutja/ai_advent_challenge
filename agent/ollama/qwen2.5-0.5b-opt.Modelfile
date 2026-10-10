@@ -1,0 +1,11 @@
+# Day 29 — оптимизированный вариант qwen2.5:0.5b под RAG-кейс агента.
+# Создание: ollama create qwen2.5:0.5b-opt -f agent/ollama/qwen2.5-0.5b-opt.Modelfile
+#
+# num_ctx 8192 — главный фикс: дефолтный runtime-контекст Ollama (~2–4k токенов)
+# усекал RAG-контекст (до 6000 символов ≈ 2–3к токенов), терялись чанки-источники.
+# temperature 0.2 / top_p 0.8 — детерминированные фактические ответы вместо
+# «творческих» (стабильность покрытия фактов).
+FROM qwen2.5:0.5b
+PARAMETER num_ctx 8192
+PARAMETER temperature 0.2
+PARAMETER top_p 0.8
