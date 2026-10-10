@@ -55,7 +55,16 @@ func main() {
 	ragRuns := flag.Int("rag-runs", 3, "прогонов на вопрос для оценки стабильности/оптимизации")
 	chatMode := flag.Bool("chat", false, "мини-чат с RAG + памятью задачи: REPL, каждый ход ищет контекст и отвечает с источниками")
 	chatScenarios := flag.Bool("chat-scenarios", false, "прогнать 2 длинных сценария мини-чата с автопроверкой (results/chat_scenarios.md)")
+	serviceCheck := flag.Bool("service-check", false, "проверить приватный сервис по сети: доступ, чат, нагрузка, лимиты (results/service_report.md)")
+	svcHost := flag.String("host", "", "LAN IP сервера для --service-check (по умолчанию — автоопределение)")
+	svcLoad := flag.Int("load-requests", 12, "число последовательных запросов в нагрузочном тесте")
 	flag.Parse()
+
+	// --- Приватный сервис (День 30): проверки по сети, конфиг не нужен ---
+	if *serviceCheck {
+		runServiceCheck(*svcHost, *svcLoad)
+		return
+	}
 
 	cfg, err := agent.LoadConfig(*cfgPath)
 	if err != nil {

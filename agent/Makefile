@@ -146,6 +146,14 @@ run-web:
 run-web-local:
 	$(LOCAL_ENV) go run ./cmd/web --config config.local.json
 
+# ===== Приватный сервис (День 30): web-агент на всех интерфейсах =====
+# Слушает 0.0.0.0:8080 — доступен с телефона/других устройств в Wi-Fi-сети:
+#   http://<LAN-IP-Mac>:8080   (IP: ipconfig getifaddr en0)
+# Требуется Ollama на внешнем интерфейсе: OLLAMA_HOST=0.0.0.0 ollama serve.
+# ⚠️ Без аутентификации — только для доверенной домашней сети!
+run-web-service:
+	$(LOCAL_ENV) go run ./cmd/web --config config.service.json
+
 # Остановить ранее запущенный web-сервер (по порту из config.json: web_addr).
 # `go run` компилирует бинарник во временную папку, поэтому гасим процесс,
 # слушающий порт (по умолчанию 8080).
