@@ -1,4 +1,4 @@
-.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build test reset-history
+.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build-web service-install service-stop build test reset-history
 
 # ===== Локальная LLM (День 27) =====
 # Подключение к локальной модели через Ollama (OpenAI-совместимый эндпоинт).
@@ -153,6 +153,40 @@ run-web-local:
 # ⚠️ Без аутентификации — только для доверенной домашней сети!
 run-web-service:
 	$(LOCAL_ENV) go run ./cmd/web --config config.service.json
+
+# ===== Постоянная работа сервиса (LaunchAgents, экономия ресурсов) =====
+# Устанавливает Ollama и web-агент как фоновые сервисы macOS:
+#   - автозапуск при входе в систему, авто-перезапуск при падении;
+#   - работают без открытого терминала;
+#   - OLLAMA_KEEP_ALIVE=3m — модель выгружается из RAM при простое
+#     (~400 МБ освобождается) и загружается при первом запросе (~1–2 с);
+#   - бинарник bin/agent-web вместо go run — не держит тулчейн Go.
+service-install: build-web
+	@pkill -f "ollama serve" 2>/dev/null || true
+	@pkill -x agent-web 2>/dev/null || true
+	@pkill -x web 2>/dev/null || true
+	@sleep 1
+	@launchctl unload ~/Library/LaunchAgents/aichallenge.ollama.plist 2>/dev/null || true
+	@launchctl unload ~/Library/LaunchAgents/aichallenge.agent-web.plist 2>/dev/null || true
+	@mkdir -p ~/Library/LaunchAgents
+	sed "s|{{REPO}}|$$(cd .. && pwd)|g" launchd/aichallenge.ollama.plist > ~/Library/LaunchAgents/aichallenge.ollama.plist
+	sed "s|{{REPO}}|$$(cd .. && pwd)|g" launchd/aichallenge.agent-web.plist.tpl > ~/Library/LaunchAgents/aichallenge.agent-web.plist
+	launchctl load ~/Library/LaunchAgents/aichallenge.ollama.plist
+	launchctl load ~/Library/LaunchAgents/aichallenge.agent-web.plist
+	@sleep 3
+	@curl -s -m 5 http://127.0.0.1:11434/api/tags -o /dev/null -w "ollama: HTTP %{http_code}\n"
+	@curl -s -m 5 http://127.0.0.1:8080/ -o /dev/null -w "web-агент: HTTP %{http_code}\n"
+	@echo "Готово. С телефона: http://$$(ipconfig getifaddr en0):8080"
+
+# Остановить фоновые сервисы (модель выгружается из памяти).
+service-stop:
+	launchctl unload ~/Library/LaunchAgents/aichallenge.ollama.plist 2>/dev/null || true
+	launchctl unload ~/Library/LaunchAgents/aichallenge.agent-web.plist 2>/dev/null || true
+	@echo "Сервисы остановлены. Запустить снова: make service-install"
+
+build-web:
+	mkdir -p bin
+	go build -o bin/agent-web ./cmd/web
 
 # Остановить ранее запущенный web-сервер (по порту из config.json: web_addr).
 # `go run` компилирует бинарник во временную папку, поэтому гасим процесс,
