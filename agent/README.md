@@ -43,6 +43,7 @@ go run ./cmd/cli --check-invariants  # демо: конфликт запроса
 go run ./cmd/cli --mcp-tools         # MCP: подключиться к серверу и вывести список инструментов
 go run ./cmd/mcp-server              # MCP: запустить сервер как отдельный процесс (stdio)
 go run ./cmd/cli --rag "вопрос"      # RAG-ответ: индекс index_service + LLM с источниками
+go run ./cmd/cli --dev-help "вопрос" # ассистент разработчика: RAG (README/docs) + MCP git-контекст
 go run ./cmd/cli --rag-eval          # сравнение без RAG vs с RAG на 10 контрольных вопросах
 go run ./cmd/cli --rag-eval --judge  # то же + LLM-as-judge
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
@@ -87,10 +88,43 @@ make reset-history                   # удалить agent_history.db (сбро
 | `summarize`     | `text`, `max_words?`                                                     | `{summary, words, sources}` |
 | `save_to_file`  | `filename`, `content`                                                    | `{path, bytes}` → `results/pipeline/` |
 | `generate_document` | `topic`                                                              | `{id, title, snippet, source: llm\|fallback}` |
+| `git_branch`   | —                                                                        | `{branch, status[], clean}` — текущая ветка + изменённые файлы |
+| `git_status`   | `porcelain?`                                                             | `{branch, clean, lines[]}` — статус рабочей копии |
+| `git_diff`     | `path?`, `full?`, `max_lines?`                                           | `{stat, diff, files_changed, insertions, deletions}` |
+| `git_files`    | `pattern?`, `top?`                                                       | `{total, files[]}` — отслеживаемые файлы репозитория |
 
 Описание входных параметров попадает в JSON-схему инструмента автоматически
 (из типов-структур и `jsonschema`-тегов), т.е. регистрация инструмента +
 описание параметров + возврат структурированного результата реализованы.
+
+### Ассистент разработчика (`/help`)
+
+Команда `/help <вопрос>` отвечает на вопросы о структуре проекта, объединяя
+**RAG по документации** (README, `agent/docs`, код — индекс `index_service`) и
+**git-контекст через MCP** (ветка, статус, незакоммиченные изменения, файлы):
+
+1. CLI/web собирают git-контекст через MCP-инструменты домена `git`
+   ([`mcpx.GitContext`](feature/mcp/git.go));
+2. ядро [`Agent.SayHelp`](devhelp.go) кладёт git-контекст в `extraSystem`
+   (перед RAG-контекстом) и вызывает `rag.AnswerRAGWithHistory` — строгий формат
+   с источниками и режим «не знаю»;
+3. ответ печатается с блоком источников (как в RAG-чате).
+
+Запуск:
+
+```bash
+make run-help QUERY="как устроен агент и какие MCP-инструменты есть"
+# или вручную:
+go run ./cmd/cli --dev-help "как устроен агент и какие MCP-инструменты есть"
+```
+
+В REPL-чате (`go run ./cmd/cli --chat`): `/help` — справка + текущая git-ветка,
+`/help <вопрос>` — ответ ассистента. В web-чате `/help` работает так же
+(приоритет над RAG-режимом; ветка и источники показываются под ответом).
+
+Требования: индекс `index_service` (`cd ../index_service && make index`),
+собранный `bin/mcp-server` (`make build-mcp-server`) и доступ к LLM (`.env`).
+Если git-сервер недоступен — ассистент отвечает только по документации.
 
 ### Планировщик и фоновые задачи
 

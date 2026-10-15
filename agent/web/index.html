@@ -669,6 +669,15 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    // ---- Ассистент разработчика: текущая git-ветка (из MCP git) ----
+    function renderGitBranch(branch) {
+      const div = document.createElement('div');
+      div.className = 'msg rag-sources';
+      div.innerHTML = '<div class="rag-head">🌿 git: ' + esc(branch) + '</div>';
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
     // ---- Панель «Память задачи»: цель + факты сессии ----
     function renderSession(data) {
       if (!data) return;
@@ -1337,6 +1346,36 @@
       if (handleMCPSlash(text)) return;
       if (handleTaskSlash(text)) return;
       (async () => {
+      // Ассистент разработчика: /help [вопрос] → POST /chat (RAG + MCP git-контекст).
+      if (text.startsWith('/help')) {
+        add('user', text);
+        showTyping();
+        showWorking('Ассистент ищет в документации…');
+        try {
+          const resp = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, rag: false }),
+          });
+          if (!resp.ok) {
+            const e = await resp.json().catch(() => ({}));
+            throw new Error(e.error || ('HTTP ' + resp.status));
+          }
+          const d = await resp.json();
+          hideTyping();
+          hideWorking();
+          add('assistant', d.reply || '');
+          if (d.git_branch) renderGitBranch(d.git_branch);
+          renderSources(d.sources, d.engine, d.format_ok, d.unknown);
+          if (d.stats) renderStats(d.stats);
+        } catch (err) {
+          hideTyping();
+          hideWorking();
+          add('assistant', '[ошибка] ' + err.message);
+          showToast(err.message, 'error');
+        }
+        return;
+      }
       // Активной задачи нет — первое сообщение само её начинает (цель = текст),
       // и агент сразу составляет план, выводя его в чат как сообщение.
       if (!hasActiveTask()) {

@@ -13,8 +13,8 @@ type ServerSpec struct {
 	Args    []string `json:"args,omitempty"`
 }
 
-// DefaultServerSpecs возвращает три домена по умолчанию: один бинарник
-// mcp-server, запущенный с разными --server (tasks | scheduler | knowledge).
+// DefaultServerSpecs возвращает домены по умолчанию: один бинарник
+// mcp-server, запущенный с разными --server (tasks | scheduler | knowledge | git).
 func DefaultServerSpecs(command string) []ServerSpec {
 	if command == "" {
 		command = "bin/mcp-server"
@@ -23,6 +23,7 @@ func DefaultServerSpecs(command string) []ServerSpec {
 		{Name: ServerTasks, Command: command, Args: []string{"--server", ServerTasks}},
 		{Name: ServerScheduler, Command: command, Args: []string{"--server", ServerScheduler}},
 		{Name: ServerKnowledge, Command: command, Args: []string{"--server", ServerKnowledge}},
+		{Name: ServerGit, Command: command, Args: []string{"--server", ServerGit}},
 	}
 }
 

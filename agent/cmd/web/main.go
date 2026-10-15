@@ -89,6 +89,10 @@ type chatResp struct {
 	FormatOK     bool              `json:"format_ok,omitempty"`
 	SessionFacts map[string]string `json:"session_facts,omitempty"`
 	Goal         string            `json:"goal,omitempty"`
+
+	// --- Ассистент разработчика: /help (RAG + MCP git-контекст) ---
+	Help      bool   `json:"help,omitempty"`       // ответ ассистента разработчика
+	GitBranch string `json:"git_branch,omitempty"` // текущая git-ветка (из MCP git)
 }
 
 type sourceView struct {
@@ -261,6 +265,17 @@ func strategyLabel(ag *agent.Agent) string {
 	return "off"
 }
 
+// webHelpText — справка по командам для /help без вопроса (без вызова LLM).
+func webHelpText() string {
+	return "Ассистент разработчика. Команды:\n" +
+		"  /help <вопрос>   — ответ о проекте: RAG (README/docs) + git-контекст (ветка/статус/diff)\n" +
+		"  /help            — эта справка + текущая git-ветка\n" +
+		"  /goal <текст>    — переопределить цель диалога\n" +
+		"  /facts           — показать факты сессии (память задачи)\n" +
+		"  /reset           — сбросить контекст (новый диалог, новая цель)\n" +
+		"Пример: /help как устроен агент и какие MCP-инструменты есть"
+}
+
 func handleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "ожидается POST", http.StatusMethodNotAllowed)
@@ -274,10 +289,29 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 
 	var reply *agent.Reply
 	var err error
-	if req.RAG {
-		reply, err = ag.SayChat(req.Message)
+	helpMode := false
+	gitBranch := ""
+	msg := strings.TrimSpace(req.Message)
+	if strings.HasPrefix(msg, "/help") {
+		// Ассистент разработчика: /help [вопрос] → RAG (README/docs) + MCP git-контекст.
+		// Приоритет над RAG-режимом: /help обрабатывается всегда одинаково.
+		helpMode = true
+		query := strings.TrimSpace(strings.TrimPrefix(msg, "/help"))
+		if query == "" {
+			reply = &agent.Reply{Text: webHelpText()}
+		} else {
+			gitCtx, br, gerr := mcpx.GitContext(r.Context(), appCfg.MCPCommand)
+			if gerr == nil {
+				gitBranch = br
+			} else {
+				gitCtx = ""
+			}
+			reply, err = ag.SayHelp(query, gitCtx)
+		}
+	} else if req.RAG {
+		reply, err = ag.SayChat(msg)
 	} else {
-		reply, err = ag.Say(req.Message)
+		reply, err = ag.Say(msg)
 	}
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -290,8 +324,8 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	if len(reply.Events) > 0 {
 		resp.Events = reply.Events
 	}
-	// RAG-чат: источники, движок, формат, память задачи.
-	if req.RAG {
+	// RAG-чат и /help: источники, движок, формат, память задачи.
+	if req.RAG || helpMode {
 		resp.Engine = reply.Engine
 		resp.Unknown = reply.Unknown
 		resp.FormatOK = reply.FormatOK
@@ -301,8 +335,14 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 				resp.Sources[i] = sourceView{Source: s.Source, Section: s.Section, Score: s.Score}
 			}
 		}
-		resp.Goal = ag.Goal()
-		resp.SessionFacts = ag.SessionFacts()
+		if req.RAG {
+			resp.Goal = ag.Goal()
+			resp.SessionFacts = ag.SessionFacts()
+		}
+	}
+	if helpMode {
+		resp.Help = true
+		resp.GitBranch = gitBranch
 	}
 	if reply.Usage != nil && reply.Usage.TotalTokens >= 0 {
 		resp.Usage = &usageView{

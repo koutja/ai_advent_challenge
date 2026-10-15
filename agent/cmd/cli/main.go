@@ -46,6 +46,7 @@ func main() {
 	mcpPipeline := flag.String("mcp-pipeline", "", "пайплайн: search → summarize → save_to_file по запросу")
 	mcpOrchestrate := flag.String("mcp-orchestrate", "", "длинный флоу через несколько MCP-серверов по теме")
 	ragQ := flag.String("rag", "", "RAG-ответ на вопрос: поиск чанков в индексе index_service + LLM с источниками")
+	devHelp := flag.String("dev-help", "", "ассистент разработчика: ответ о проекте через RAG (README/docs) + MCP git-контекст (ветка/статус/diff)")
 	ragEval := flag.Bool("rag-eval", false, "сравнить качество без RAG и с RAG на контрольных вопросах (results/rag_comparison.md)")
 	ragJudge := flag.Bool("judge", false, "добавить LLM-as-judge к --rag-eval")
 	ragModes := flag.Bool("rag-modes", false, "сравнить режимы пайплайна: base/filter/full (results/rag_modes_comparison.md)")
@@ -107,6 +108,12 @@ func main() {
 	}
 	if *ragCitations {
 		runRAGCitations(cfg, *ragJudge)
+		return
+	}
+
+	// --- Ассистент разработчика: /help (RAG по README/docs + MCP git-контекст) ---
+	if *devHelp != "" {
+		runDevHelp(cfg, *devHelp)
 		return
 	}
 

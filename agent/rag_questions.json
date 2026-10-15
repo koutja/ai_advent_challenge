@@ -65,6 +65,30 @@
       "question": "Откуда загружается модель эмбеддингов для индекса и о чём предупреждает библиотека, если не задан HF_TOKEN?",
       "expectation": ["Hugging Face", "HF_TOKEN", "кэш"],
       "sources": ["index_service/README.md"]
+    },
+    {
+      "id": "q12",
+      "question": "Как устроен модуль agent и какие фронтенды у него есть?",
+      "expectation": ["ядро", "CLI", "web", "Say"],
+      "sources": ["agent/README.md"]
+    },
+    {
+      "id": "q13",
+      "question": "Какие MCP-инструменты доступны агенту и какие домены серверов существуют?",
+      "expectation": ["tasks", "scheduler", "knowledge", "git"],
+      "sources": ["agent/README.md", "agent/feature/mcp/server.go"]
+    },
+    {
+      "id": "q14",
+      "question": "Как запустить web-чат агента и на каком адресе он работает по умолчанию?",
+      "expectation": ["go run ./cmd/web", "8080"],
+      "sources": ["agent/README.md"]
+    },
+    {
+      "id": "q15",
+      "question": "Какие git-инструменты предоставляет MCP-домен git и что они возвращают?",
+      "expectation": ["git_branch", "git_status", "git_diff", "git_files"],
+      "sources": ["agent/feature/mcp/git.go", "agent/README.md"]
     }
   ]
 }

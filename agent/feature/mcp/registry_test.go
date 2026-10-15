@@ -10,12 +10,13 @@ import (
 	"time"
 )
 
-// helperSpecs — спецификации трёх тестовых MCP-серверов (по доменам).
+// helperSpecs — спецификации тестовых MCP-серверов (по доменам, включая git).
 func helperSpecs() []ServerSpec {
 	return []ServerSpec{
 		{Name: ServerTasks, Command: os.Args[0], Args: []string{"-test.run=TestHelperServerTasks"}},
 		{Name: ServerScheduler, Command: os.Args[0], Args: []string{"-test.run=TestHelperServerScheduler"}},
 		{Name: ServerKnowledge, Command: os.Args[0], Args: []string{"-test.run=TestHelperServerKnowledge"}},
+		{Name: ServerGit, Command: os.Args[0], Args: []string{"-test.run=TestGitHelperServer"}},
 	}
 }
 
@@ -44,6 +45,10 @@ func TestRegistryRouting(t *testing.T) {
 		"save_to_file": ServerKnowledge,
 		"reminder_add": ServerScheduler,
 		"get_summary":  ServerScheduler,
+		"git_branch":   ServerGit,
+		"git_status":   ServerGit,
+		"git_diff":     ServerGit,
+		"git_files":    ServerGit,
 	}
 	for tool, want := range wantOwner {
 		got, ok := reg.Owner(tool)

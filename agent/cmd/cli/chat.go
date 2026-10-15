@@ -16,6 +16,7 @@ import (
 // текущему вопросу + история + память задачи + строгий формат с источниками).
 // Под ответом печатается блок найденных источников. Команды:
 //
+//	/help [вопрос]  — ассистент разработчика: RAG (README/docs) + MCP git-контекст
 //	/goal <текст>  — переопределить цель диалога
 //	/facts         — показать факты сессии (память задачи)
 //	/reset         — сбросить контекст (новый диалог, новая цель)
@@ -36,7 +37,7 @@ func runChat(cfg *agent.Config) {
 	}
 
 	fmt.Printf("Мини-чат с RAG (модель %s). Цель: первое сообщение.\n", ag.Client().Model())
-	fmt.Println("Команды: /goal <текст>, /facts, /reset, /exit.")
+	fmt.Println("Команды: /help [вопрос], /goal <текст>, /facts, /reset, /exit.")
 	printChatHistory(ag)
 
 	sc := bufio.NewScanner(os.Stdin)
@@ -70,6 +71,10 @@ func runChat(cfg *agent.Config) {
 			} else {
 				fmt.Println("[контекст сброшен, новый диалог]")
 			}
+			fmt.Print("> ")
+			continue
+		case strings.HasPrefix(line, "/help"):
+			devHelpREPL(ag, cfg, line)
 			fmt.Print("> ")
 			continue
 		}

@@ -1,4 +1,4 @@
-.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios stop-web build-mcp-server build-web service-install service-stop service-detach service-detach-stop build test reset-history
+.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios run-help stop-web build-mcp-server build-web service-install service-stop service-detach service-detach-stop build test reset-history
 
 # ===== Локальная LLM (День 27) =====
 # Подключение к локальной модели через Ollama (OpenAI-совместимый эндпоинт).
@@ -69,6 +69,15 @@ run-mcp-pipeline:
 # Пример: make run-mcp-orchestrate QUERY=mcp
 run-mcp-orchestrate:
 	go run ./cmd/cli --mcp-orchestrate "$(QUERY)"
+
+# ===== Ассистент разработчика: /help (RAG по README/docs + MCP git-контекст) =====
+# Одноразовый ответ о проекте: вопрос → git-контекст (ветка/статус/diff через
+# MCP-инструменты домена git) + RAG по индексу index_service → ответ с источниками.
+# Требует индекс index_service (cd ../index_service && make index) и собранный
+# mcp-server (make build-mcp-server). Пример:
+#   make run-help QUERY="как устроен агент и какие MCP-инструменты есть"
+run-help:
+	go run ./cmd/cli --dev-help "$(QUERY)"
 
 # ===== RAG (День 22): первый RAG-запрос =====
 # Требует индекс index_service (cd ../index_service && make index) и, для
