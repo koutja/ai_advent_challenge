@@ -130,28 +130,48 @@ func (g *gitRunner) status(ctx context.Context, porcelain bool) (gitStatusOutput
 
 // gitDiffOutput — результат git_diff.
 type gitDiffOutput struct {
-	Stat         string `json:"stat"`           // сводка git diff --stat
-	Diff         string `json:"diff,omitempty"` // полный diff (если запрошен)
-	FilesChanged int    `json:"files_changed"`
-	Insertions   int    `json:"insertions"`
-	Deletions    int    `json:"deletions"`
-	Truncated    bool   `json:"truncated"`
+	Stat         string   `json:"stat"`                  // сводка git diff --stat
+	Diff         string   `json:"diff,omitempty"`        // полный diff (если запрошен)
+	NameStatus   []string `json:"name_status,omitempty"` // изменённые файлы (M/A/D)
+	FilesChanged int      `json:"files_changed"`
+	Insertions   int      `json:"insertions"`
+	Deletions    int      `json:"deletions"`
+	Truncated    bool     `json:"truncated"`
 }
 
-// diff возвращает незакоммиченные изменения: всегда сводку --stat, а при
-// full/path — полный diff (по пути или по всему репозиторию), ограниченный
-// maxLines строками (0 — без лимита).
-func (g *gitRunner) diff(ctx context.Context, path string, full bool, maxLines int) (gitDiffOutput, error) {
+// diff возвращает изменения: рабочая копия (base пуст) или диапазон
+// <base>...HEAD (для ревью PR). Всегда сводка --stat; при nameStatus — список
+// изменённых файлов; при full/path — полный diff (по пути или по всему
+// репозиторию), ограниченный maxLines строками (0 — без лимита).
+func (g *gitRunner) diff(ctx context.Context, base, path string, nameStatus, full bool, maxLines int) (gitDiffOutput, error) {
 	res := gitDiffOutput{}
-	out, err := g.run(ctx, "diff", "--stat")
+	revs := revisionArgs(base) // nil — рабочая копия; иначе ["<base>...HEAD"]
+
+	run := func(extra ...string) (string, error) {
+		args := []string{"diff"}
+		args = append(args, revs...)
+		args = append(args, extra...)
+		return g.run(ctx, args...)
+	}
+
+	out, err := run("--stat")
 	if err != nil {
 		return res, err
 	}
 	res.Stat = strings.TrimSpace(out)
 	res.FilesChanged, res.Insertions, res.Deletions = parseDiffStat(res.Stat)
 
+	if nameStatus {
+		out, err := run("--name-status")
+		if err != nil {
+			return res, err
+		}
+		res.NameStatus = nonEmptyLines(out)
+	}
+
 	if full || path != "" {
 		args := []string{"diff"}
+		args = append(args, revs...)
 		if path != "" {
 			args = append(args, "--", path)
 		}
@@ -162,6 +182,15 @@ func (g *gitRunner) diff(ctx context.Context, path string, full bool, maxLines i
 		res.Diff, res.Truncated = limitLines(out, maxLines)
 	}
 	return res, nil
+}
+
+// revisionArgs превращает базовую ветку в ревизию git diff <base>...HEAD
+// (пусто — рабочая копия).
+func revisionArgs(base string) []string {
+	if b := strings.TrimSpace(base); b != "" {
+		return []string{b + "...HEAD"}
+	}
+	return nil
 }
 
 // gitFilesOutput — результат git_files.
@@ -281,7 +310,7 @@ func addGitTools(s *mcp.Server) {
 		Name:        "git_diff",
 		Description: "Возвращает незакоммиченные изменения: сводку git diff --stat и/или полный diff по пути.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gitDiffInput) (*mcp.CallToolResult, gitDiffOutput, error) {
-		res, err := g.diff(ctx, in.Path, in.Full, in.MaxLines)
+		res, err := g.diff(ctx, in.Base, in.Path, in.NameStatus, in.Full, in.MaxLines)
 		if err != nil {
 			return nil, gitDiffOutput{}, err
 		}
@@ -308,10 +337,14 @@ type gitStatusInput struct {
 }
 
 type gitDiffInput struct {
+	// Base — базовая ветка/коммит для diff <base>...HEAD; пусто — рабочая копия (незакоммиченные изменения).
+	Base string `json:"base,omitempty" jsonschema:"базовая ветка/коммит для diff <base>...HEAD (ревью PR); пусто — незакоммиченные изменения"`
 	// Path — ограничить diff одним путём (например agent/agent.go); пусто — весь репозиторий.
 	Path string `json:"path,omitempty" jsonschema:"ограничить diff одним путём, например agent/agent.go; пусто — весь репозиторий"`
 	// Full — вернуть полный diff (не только сводку --stat); по умолчанию false.
 	Full bool `json:"full,omitempty" jsonschema:"вернуть полный diff (не только сводку --stat); по умолчанию false"`
+	// NameStatus — вернуть список изменённых файлов (M/A/D); по умолчанию false.
+	NameStatus bool `json:"name_status,omitempty" jsonschema:"вернуть список изменённых файлов (M/A/D); по умолчанию false"`
 	// MaxLines — лимит строк полного diff; 0 — без лимита.
 	MaxLines int `json:"max_lines,omitempty" jsonschema:"лимит строк полного diff; 0 — без лимита"`
 }

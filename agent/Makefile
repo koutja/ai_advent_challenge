@@ -1,4 +1,4 @@
-.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios run-help stop-web build-mcp-server build-web service-install service-stop service-detach service-detach-stop build test reset-history
+.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios run-help run-review run-review-pr stop-web build-mcp-server build-web service-install service-stop service-detach service-detach-stop build test reset-history
 
 # ===== Локальная LLM (День 27) =====
 # Подключение к локальной модели через Ollama (OpenAI-совместимый эндпоинт).
@@ -69,6 +69,18 @@ run-mcp-pipeline:
 # Пример: make run-mcp-orchestrate QUERY=mcp
 run-mcp-orchestrate:
 	go run ./cmd/cli --mcp-orchestrate "$(QUERY)"
+
+# ===== AI-ревью кода: diff через MCP git + RAG-контекст + LLM =====
+# Ревью незакоммиченных изменений (рабочая копия). Отчёт: results/review_working.md.
+# Требует индекс index_service (cd ../index_service && make index), собранный
+# mcp-server (make build-mcp-server) и доступ к LLM (.env).
+run-review:
+	go run ./cmd/cli --review
+
+# Ревью diff ветки относительно базы (аналог PR): git diff $(BASE)...HEAD.
+# Пример: make run-review-pr BASE=main. Отчёт: results/review_main.md.
+run-review-pr:
+	go run ./cmd/cli --review $(BASE)
 
 # ===== Ассистент разработчика: /help (RAG по README/docs + MCP git-контекст) =====
 # Одноразовый ответ о проекте: вопрос → git-контекст (ветка/статус/diff через

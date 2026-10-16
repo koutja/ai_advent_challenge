@@ -44,6 +44,8 @@ go run ./cmd/cli --mcp-tools         # MCP: подключиться к серв
 go run ./cmd/mcp-server              # MCP: запустить сервер как отдельный процесс (stdio)
 go run ./cmd/cli --rag "вопрос"      # RAG-ответ: индекс index_service + LLM с источниками
 go run ./cmd/cli --dev-help "вопрос" # ассистент разработчика: RAG (README/docs) + MCP git-контекст
+go run ./cmd/cli --review            # AI-ревью кода: diff через MCP git + RAG-контекст + LLM (рабочая копия)
+go run ./cmd/cli --review main       # то же для PR: git diff main...HEAD
 go run ./cmd/cli --rag-eval          # сравнение без RAG vs с RAG на 10 контрольных вопросах
 go run ./cmd/cli --rag-eval --judge  # то же + LLM-as-judge
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
@@ -125,6 +127,30 @@ go run ./cmd/cli --dev-help "как устроен агент и какие MCP-
 Требования: индекс `index_service` (`cd ../index_service && make index`),
 собранный `bin/mcp-server` (`make build-mcp-server`) и доступ к LLM (`.env`).
 Если git-сервер недоступен — ассистент отвечает только по документации.
+
+### AI-ревью кода (`--review`)
+
+Ручное ревью изменений: **diff и изменённые файлы** берутся через MCP-инструмент
+`git_diff` (домен `git`), **RAG-контекст** проекта (конвенции из README/docs/кода —
+индекс `index_service`) подмешивается в ревью-промпт, а **LLM** возвращает
+структурированный отчёт с тремя секциями: потенциальные баги, архитектурные
+проблемы, рекомендации (парсер секций — [`review.go`](review.go)).
+
+```bash
+make run-review                 # ревью незакоммиченных изменений (рабочая копия)
+make run-review-pr BASE=main    # ревью PR: git diff main...HEAD
+# или вручную:
+go run ./cmd/cli --review            # то же, рабочая копия
+go run ./cmd/cli --review main       # то же, diff main...HEAD
+```
+
+Отчёт печатается в консоль и сохраняется в `results/review_<база>.md`
+(`results/` в `.gitignore`). Поток: CLI → MCP git (`git_diff {base, full,
+name_status}`) → [`Agent.Review`](review.go) → отчёт (баги/архитектура/рекомендации).
+
+Требования: индекс `index_service`, собранный `bin/mcp-server`, доступ к LLM.
+Качество ревью зависит от модели: маленькая локальная LLM заметно слабее
+облачной — для «боевого» применения используйте `LLM_MODEL` покрупнее.
 
 ### Планировщик и фоновые задачи
 

@@ -47,6 +47,7 @@ func main() {
 	mcpOrchestrate := flag.String("mcp-orchestrate", "", "длинный флоу через несколько MCP-серверов по теме")
 	ragQ := flag.String("rag", "", "RAG-ответ на вопрос: поиск чанков в индексе index_service + LLM с источниками")
 	devHelp := flag.String("dev-help", "", "ассистент разработчика: ответ о проекте через RAG (README/docs) + MCP git-контекст (ветка/статус/diff)")
+	reviewRun := flag.Bool("review", false, "ревью кода: diff через MCP git + RAG-контекст проекта + LLM; базовая ветка — первым позиционным аргументом (по умолчанию — рабочая копия); отчёт в results/")
 	ragEval := flag.Bool("rag-eval", false, "сравнить качество без RAG и с RAG на контрольных вопросах (results/rag_comparison.md)")
 	ragJudge := flag.Bool("judge", false, "добавить LLM-as-judge к --rag-eval")
 	ragModes := flag.Bool("rag-modes", false, "сравнить режимы пайплайна: base/filter/full (results/rag_modes_comparison.md)")
@@ -114,6 +115,16 @@ func main() {
 	// --- Ассистент разработчика: /help (RAG по README/docs + MCP git-контекст) ---
 	if *devHelp != "" {
 		runDevHelp(cfg, *devHelp)
+		return
+	}
+
+	// --- AI-ревью кода: --review [base] (diff через MCP git + RAG + LLM) ---
+	if *reviewRun {
+		base := ""
+		if rest := flag.Args(); len(rest) > 0 {
+			base = rest[0]
+		}
+		runReview(cfg, base)
 		return
 	}
 

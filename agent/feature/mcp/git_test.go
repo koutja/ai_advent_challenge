@@ -81,12 +81,39 @@ func TestGitRunnerStatus(t *testing.T) {
 
 func TestGitRunnerDiff(t *testing.T) {
 	g := &gitRunner{}
-	d, err := g.diff(context.Background(), "", false, 0)
+	d, err := g.diff(context.Background(), "", "", false, false, 0)
 	if err != nil {
 		t.Fatalf("diff: %v", err)
 	}
 	// stat может быть пустым (чистая рабочая копия), но ошибки быть не должно.
 	_ = d
+}
+
+// TestGitRunnerDiffBase — diff диапазона <base>...HEAD (ревью PR).
+func TestGitRunnerDiffBase(t *testing.T) {
+	g := &gitRunner{}
+	// HEAD~1...HEAD — diff последнего коммита (в репозитории есть история).
+	d, err := g.diff(context.Background(), "HEAD~1", "", false, true, 0)
+	if err != nil {
+		t.Fatalf("diff(base=HEAD~1): %v", err)
+	}
+	if d.Diff == "" {
+		t.Error("diff(base=HEAD~1): ожидали непустой полный diff последнего коммита")
+	}
+}
+
+// TestGitRunnerDiffNameStatus — список изменённых файлов (M/A/D).
+func TestGitRunnerDiffNameStatus(t *testing.T) {
+	g := &gitRunner{}
+	d, err := g.diff(context.Background(), "", "", true, false, 0)
+	if err != nil {
+		t.Fatalf("diff(name_status): %v", err)
+	}
+	for _, ns := range d.NameStatus {
+		if len(ns) < 3 || (ns[0] != 'M' && ns[0] != 'A' && ns[0] != 'D' && ns[0] != 'R') {
+			t.Errorf("неожиданная строка name-status: %q", ns)
+		}
+	}
 }
 
 func TestGitRunnerFiles(t *testing.T) {
