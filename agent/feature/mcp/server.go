@@ -19,6 +19,8 @@
 //     (см. pipeline.go, corpus.go);
 //   - git        — git_branch / git_status / git_diff / git_files
 //     (локальный git CLI, см. git.go);
+//   - support    — get_user / get_ticket / list_tickets / create_ticket /
+//     update_ticket (JSON-CRM, см. crm.go, support.go);
 //   - all        — демо (get_time, echo) + все домены выше.
 package mcpx
 
@@ -45,6 +47,7 @@ const (
 	ServerScheduler = "scheduler"
 	ServerKnowledge = "knowledge"
 	ServerGit       = "git"
+	ServerSupport   = "support"
 )
 
 // NewServer собирает MCP-сервер со всеми инструментами (обратная совместимость).
@@ -53,7 +56,7 @@ func NewServer() *mcp.Server {
 }
 
 // BuildServer собирает MCP-сервер с инструментами указанного домена:
-// tasks | scheduler | knowledge | git | all (по умолчанию all).
+// tasks | scheduler | knowledge | git | support | all (по умолчанию all).
 func BuildServer(kind string) *mcp.Server {
 	switch kind {
 	case ServerTasks:
@@ -67,6 +70,8 @@ func BuildServer(kind string) *mcp.Server {
 		return registerKnowledge()
 	case ServerGit:
 		return registerGit()
+	case ServerSupport:
+		return registerSupport()
 	default:
 		api := newMockAPI()
 		st := openDefaultStore()
@@ -78,6 +83,7 @@ func BuildServer(kind string) *mcp.Server {
 		addSchedulerTools(s, st)
 		addKnowledgeTools(s)
 		addGitTools(s)
+		addSupportTools(s, openDefaultCRM())
 		return s
 	}
 }
@@ -123,6 +129,12 @@ func registerKnowledge() *mcp.Server {
 func registerGit() *mcp.Server {
 	s := newBaseServer()
 	addGitTools(s)
+	return s
+}
+
+func registerSupport() *mcp.Server {
+	s := newBaseServer()
+	addSupportTools(s, openDefaultCRM())
 	return s
 }
 

@@ -22,7 +22,8 @@
     { "name": "tasks", "command": "bin/mcp-server", "args": ["--server", "tasks"] },
     { "name": "scheduler", "command": "bin/mcp-server", "args": ["--server", "scheduler"] },
     { "name": "knowledge", "command": "bin/mcp-server", "args": ["--server", "knowledge"] },
-    { "name": "git", "command": "bin/mcp-server", "args": ["--server", "git"] }
+    { "name": "git", "command": "bin/mcp-server", "args": ["--server", "git"] },
+    { "name": "support", "command": "bin/mcp-server", "args": ["--server", "support"] }
   ],
   "rag": {
     "enabled": true,

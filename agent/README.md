@@ -46,6 +46,7 @@ go run ./cmd/cli --rag "вопрос"      # RAG-ответ: индекс index_
 go run ./cmd/cli --dev-help "вопрос" # ассистент разработчика: RAG (README/docs) + MCP git-контекст
 go run ./cmd/cli --review            # AI-ревью кода: diff через MCP git + RAG-контекст + LLM (рабочая копия)
 go run ./cmd/cli --review main       # то же для PR: git diff main...HEAD
+go run ./cmd/cli --support "вопрос" --ticket T-001 # ассистент поддержки: RAG (FAQ) + контекст тикета из JSON-CRM
 go run ./cmd/cli --rag-eval          # сравнение без RAG vs с RAG на 10 контрольных вопросах
 go run ./cmd/cli --rag-eval --judge  # то же + LLM-as-judge
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
@@ -94,6 +95,11 @@ make reset-history                   # удалить agent_history.db (сбро
 | `git_status`   | `porcelain?`                                                             | `{branch, clean, lines[]}` — статус рабочей копии |
 | `git_diff`     | `path?`, `full?`, `max_lines?`                                           | `{stat, diff, files_changed, insertions, deletions}` |
 | `git_files`    | `pattern?`, `top?`                                                       | `{total, files[]}` — отслеживаемые файлы репозитория |
+| `get_user`     | `user_id`                                                                | `{id, name, email, plan}` — пользователь CRM |
+| `get_ticket`   | `ticket_id`                                                              | `{ticket, user}` — тикет + контекст пользователя |
+| `list_tickets` | `status?`                                                                | `[ticket]` — тикеты (опционально по статусу) |
+| `create_ticket`| `user_id`, `subject`, `message`, `priority?`                             | созданный тикет (сохраняется в JSON-CRM) |
+| `update_ticket`| `ticket_id`, `status?`, `reply?`                                         | обновлённый тикет |
 
 Описание входных параметров попадает в JSON-схему инструмента автоматически
 (из типов-структур и `jsonschema`-тегов), т.е. регистрация инструмента +
@@ -151,6 +157,31 @@ name_status}`) → [`Agent.Review`](review.go) → отчёт (баги/архи
 Требования: индекс `index_service`, собранный `bin/mcp-server`, доступ к LLM.
 Качество ревью зависит от модели: маленькая локальная LLM заметно слабее
 облачной — для «боевого» применения используйте `LLM_MODEL` покрупнее.
+
+### Ассистент поддержки (`--support`)
+
+Мини-сервис поддержки: ответ на вопрос о продукте с учётом **контекста тикета**
+и **RAG по FAQ/документации** ([`support/faq.md`](support/faq.md) — источник
+продуктовых вопросов/ответов, попадает в индекс `index_service` после
+`make index`).
+
+```bash
+make run-support QUERY="Почему не работает авторизация?" TICKET=T-001
+# или вручную:
+go run ./cmd/cli --support "Почему не работает авторизация?" --ticket T-001
+```
+
+Поток: CLI → MCP `get_ticket` (домен `support`, JSON-CRM) → контекст тикета и
+пользователя в промпт → [`Agent.SupportAnswer`](support.go) (RAG по FAQ) →
+ответ с источниками.
+
+**JSON-CRM** ([`feature/mcp/crm.go`](feature/mcp/crm.go)) — «база» поддержки:
+просто JSON-файл `results/support_crm.json` (env `SUPPORT_CRM_FILE`, папка
+`results/` в `.gitignore`). При первом запуске создаётся с демо-данными
+(пользователи U-001…U-003, тикеты T-001…T-003, включая пример про
+авторизацию). Тикеты можно **создавать** (`create_ticket`) и обновлять
+(`update_ticket`) — записи переживают рестарты. Инструменты домена `support`:
+`get_user`, `get_ticket`, `list_tickets`, `create_ticket`, `update_ticket`.
 
 ### Планировщик и фоновые задачи
 

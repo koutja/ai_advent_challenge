@@ -10,13 +10,14 @@ import (
 	"time"
 )
 
-// helperSpecs — спецификации тестовых MCP-серверов (по доменам, включая git).
+// helperSpecs — спецификации тестовых MCP-серверов (по доменам, включая git и support).
 func helperSpecs() []ServerSpec {
 	return []ServerSpec{
 		{Name: ServerTasks, Command: os.Args[0], Args: []string{"-test.run=TestHelperServerTasks"}},
 		{Name: ServerScheduler, Command: os.Args[0], Args: []string{"-test.run=TestHelperServerScheduler"}},
 		{Name: ServerKnowledge, Command: os.Args[0], Args: []string{"-test.run=TestHelperServerKnowledge"}},
 		{Name: ServerGit, Command: os.Args[0], Args: []string{"-test.run=TestGitHelperServer"}},
+		{Name: ServerSupport, Command: os.Args[0], Args: []string{"-test.run=TestSupportHelperServer"}},
 	}
 }
 
@@ -25,6 +26,7 @@ func helperSpecs() []ServerSpec {
 func TestRegistryRouting(t *testing.T) {
 	t.Setenv("MCP_HELPER", "1")
 	t.Setenv("MCP_DATA_FILE", filepath.Join(t.TempDir(), "data.json"))
+	t.Setenv("SUPPORT_CRM_FILE", filepath.Join(t.TempDir(), "crm.json"))
 	isolateCorpus(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -38,17 +40,22 @@ func TestRegistryRouting(t *testing.T) {
 
 	// Выбор сервера по владельцу инструмента.
 	wantOwner := map[string]string{
-		"get_task":     ServerTasks,
-		"create_task":  ServerTasks,
-		"search":       ServerKnowledge,
-		"summarize":    ServerKnowledge,
-		"save_to_file": ServerKnowledge,
-		"reminder_add": ServerScheduler,
-		"get_summary":  ServerScheduler,
-		"git_branch":   ServerGit,
-		"git_status":   ServerGit,
-		"git_diff":     ServerGit,
-		"git_files":    ServerGit,
+		"get_task":      ServerTasks,
+		"create_task":   ServerTasks,
+		"search":        ServerKnowledge,
+		"summarize":     ServerKnowledge,
+		"save_to_file":  ServerKnowledge,
+		"reminder_add":  ServerScheduler,
+		"get_summary":   ServerScheduler,
+		"git_branch":    ServerGit,
+		"git_status":    ServerGit,
+		"git_diff":      ServerGit,
+		"git_files":     ServerGit,
+		"get_user":      ServerSupport,
+		"get_ticket":    ServerSupport,
+		"list_tickets":  ServerSupport,
+		"create_ticket": ServerSupport,
+		"update_ticket": ServerSupport,
 	}
 	for tool, want := range wantOwner {
 		got, ok := reg.Owner(tool)

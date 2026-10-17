@@ -14,7 +14,7 @@ type ServerSpec struct {
 }
 
 // DefaultServerSpecs возвращает домены по умолчанию: один бинарник
-// mcp-server, запущенный с разными --server (tasks | scheduler | knowledge | git).
+// mcp-server, запущенный с разными --server (tasks | scheduler | knowledge | git | support).
 func DefaultServerSpecs(command string) []ServerSpec {
 	if command == "" {
 		command = "bin/mcp-server"
@@ -24,6 +24,7 @@ func DefaultServerSpecs(command string) []ServerSpec {
 		{Name: ServerScheduler, Command: command, Args: []string{"--server", ServerScheduler}},
 		{Name: ServerKnowledge, Command: command, Args: []string{"--server", ServerKnowledge}},
 		{Name: ServerGit, Command: command, Args: []string{"--server", ServerGit}},
+		{Name: ServerSupport, Command: command, Args: []string{"--server", ServerSupport}},
 	}
 }
 
