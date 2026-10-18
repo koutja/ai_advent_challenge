@@ -23,7 +23,7 @@ make new-day DAY=day_04     # каркас нового дня (Go-модуль 
 | `day_03`  | Одна задача, 4 способа рассуждения + сравнение                       | `cd day_03 && make run-direct\|run-step\|run-prompt-gen\|run-panel\|run-all` |
 | `day_04`  | Влияние temperature (0 / 0.7 / 1.2) на ответ + выводы                | `cd day_04 && make run\|run-all\|run-single` |
 | `day_05`  | Один запрос на слабой/средней/сильной модели: время, токены, цена    | `cd day_05 && make run-cheap\|run-weak\|run-medium\|run-strong\|run-all` |
-| `agent/`  | Недельный агент: память, контекст, MCP-инструменты, RAG; ассистент разработчика `/help`, AI-ревью `--review`, поддержка `--support` (JSON-CRM) | `cd agent && make run-support QUERY="..." TICKET=T-001` |
+| `agent/`  | Недельный агент: память, контекст, MCP-инструменты, RAG; ассистенты `/help`, `--review`, `--support` (JSON-CRM), файловые операции `--files` | `cd agent && make run-files GOAL="найти llm.New"` |
 
 > Общий код подключения к API (чтение `.env`, конфигурация, вызов `/chat/completions`)
 > вынесен в переиспользуемый пакет [`llm/`](llm/llm.go:1) и подключается в дни через

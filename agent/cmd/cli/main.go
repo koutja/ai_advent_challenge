@@ -50,6 +50,7 @@ func main() {
 	reviewRun := flag.Bool("review", false, "ревью кода: diff через MCP git + RAG-контекст проекта + LLM; базовая ветка — первым позиционным аргументом (по умолчанию — рабочая копия); отчёт в results/")
 	supportQ := flag.String("support", "", "ассистент поддержки: ответ на вопрос о продукте через RAG (FAQ/документация) + контекст тикета из JSON-CRM")
 	supportTicket := flag.String("ticket", "", "id тикета для --support (например T-001); контекст берётся через MCP get_ticket")
+	filesGoal := flag.String("files", "", "ассистент файловых операций: цель на уровне задачи (найти/сгенерировать/проверить/обновить); LLM строит план, CLI исполняет через MCP files")
 	ragEval := flag.Bool("rag-eval", false, "сравнить качество без RAG и с RAG на контрольных вопросах (results/rag_comparison.md)")
 	ragJudge := flag.Bool("judge", false, "добавить LLM-as-judge к --rag-eval")
 	ragModes := flag.Bool("rag-modes", false, "сравнить режимы пайплайна: base/filter/full (results/rag_modes_comparison.md)")
@@ -133,6 +134,12 @@ func main() {
 	// --- Ассистент поддержки: --support "<вопрос>" [--ticket <id>] ---
 	if *supportQ != "" {
 		runSupport(cfg, *supportQ, *supportTicket)
+		return
+	}
+
+	// --- Ассистент файловых операций: --files "<задача>" (plan-then-execute) ---
+	if *filesGoal != "" {
+		runFiles(cfg, *filesGoal)
 		return
 	}
 

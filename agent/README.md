@@ -47,6 +47,7 @@ go run ./cmd/cli --dev-help "вопрос" # ассистент разработ
 go run ./cmd/cli --review            # AI-ревью кода: diff через MCP git + RAG-контекст + LLM (рабочая копия)
 go run ./cmd/cli --review main       # то же для PR: git diff main...HEAD
 go run ./cmd/cli --support "вопрос" --ticket T-001 # ассистент поддержки: RAG (FAQ) + контекст тикета из JSON-CRM
+go run ./cmd/cli --files "задача"    # ассистент файловых операций: LLM планирует, CLI читает/ищет/пишет файлы
 go run ./cmd/cli --rag-eval          # сравнение без RAG vs с RAG на 10 контрольных вопросах
 go run ./cmd/cli --rag-eval --judge  # то же + LLM-as-judge
 go run ./cmd/web                     # web-чат: http://127.0.0.1:8080
@@ -100,6 +101,10 @@ make reset-history                   # удалить agent_history.db (сбро
 | `list_tickets` | `status?`                                                                | `[ticket]` — тикеты (опционально по статусу) |
 | `create_ticket`| `user_id`, `subject`, `message`, `priority?`                             | созданный тикет (сохраняется в JSON-CRM) |
 | `update_ticket`| `ticket_id`, `status?`, `reply?`                                         | обновлённый тикет |
+| `read_file`    | `path`, `max_lines?`                                                      | `{path, lines, content}` — файл репозитория |
+| `search_files` | `pattern`, `path?`, `file_pattern?`, `max_results?`                       | `{total, matches[]}` — regexp по файлам |
+| `list_files`   | `path?`, `recursive?`                                                     | `{total, files[]}` — файлы репозитория |
+| `write_file`   | `path`, `content`                                                         | `{path, bytes}` — атомарная запись (запрет .env/.git) |
 
 Описание входных параметров попадает в JSON-схему инструмента автоматически
 (из типов-структур и `jsonschema`-тегов), т.е. регистрация инструмента +
@@ -182,6 +187,40 @@ go run ./cmd/cli --support "Почему не работает авториза�
 авторизацию). Тикеты можно **создавать** (`create_ticket`) и обновлять
 (`update_ticket`) — записи переживают рестарты. Инструменты домена `support`:
 `get_user`, `get_ticket`, `list_tickets`, `create_ticket`, `update_ticket`.
+
+### Ассистент файловых операций (`--files`)
+
+Ассистент, который **сам инициирует работу с файлами**: вы задаёте цель на
+уровне задачи, а не «открой файл X». Поток **plan-then-execute**:
+
+1. [`Agent.FilePlan`](filetask.go) — LLM строит JSON-план `{scenario, search[],
+   read[], output_file}` (при невалидном JSON — детерминированный fallback по
+   ключевым словам);
+2. CLI исполняет план через MCP-инструменты домена `files` (`search_files`,
+   `read_file`);
+3. [`Agent.FileGenerate`](filetask.go) — LLM готовит результат: отчёт
+   (find/check/diff) или содержимое файла (generate/docs);
+4. `write_file` (если `output_file`) + `git diff` (для новых файлов —
+   содержимое), иначе отчёт в `results/filetask_<сценарий>.md`.
+
+```bash
+make run-files GOAL="найти все места использования llm.New"
+make run-files GOAL="сгенерировать changelog по последним коммитам"
+make run-files GOAL="проверить соответствие файлов инвариантам"
+# или вручную:
+go run ./cmd/cli --files "найти все места использования llm.New"
+```
+
+Сценарии (LLM выбирает по цели): `find` (использования), `generate`
+(README/ADR/changelog), `check` (правила/инварианты), `docs` (обновление
+документации), `diff` (список изменений).
+
+**MCP-домен `files`** ([`feature/mcp/files.go`](feature/mcp/files.go)) —
+файловая система репозитория: `read_file` (repo-scoped, лимит строк),
+`search_files` (regexp по текстовым файлам, пропускает `results/`, `bin/`,
+`.git/`, индекс), `list_files`, `write_file` (repo-scoped, атомарно, запрещены
+`.env*` и `.git/`). План валидируется: неизвестный сценарий → отчёт, мусорные
+`output_file` отбрасываются.
 
 ### Планировщик и фоновые задачи
 

@@ -9,6 +9,7 @@
 //	--server knowledge   — search / summarize / save_to_file / generate_document
 //	--server git         — git_branch / git_status / git_diff / git_files (git CLI)
 //	--server support     — get_user / get_ticket / list_tickets / create_ticket / update_ticket (JSON-CRM)
+//	--server files       — read_file / search_files / list_files / write_file (файлы репозитория)
 //	--server all         — демо + все домены (по умолчанию)
 //
 // Оркестратор (feature/mcp/registry.go) запускает несколько таких процессов
@@ -28,7 +29,7 @@ import (
 )
 
 func main() {
-	domain := flag.String("server", "all", "домен инструментов: tasks|scheduler|knowledge|git|support|all")
+	domain := flag.String("server", "all", "домен инструментов: tasks|scheduler|knowledge|git|support|files|all")
 	flag.Parse()
 
 	server := mcpx.BuildServer(*domain)

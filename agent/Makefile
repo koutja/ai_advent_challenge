@@ -1,4 +1,4 @@
-.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios run-help run-review run-review-pr run-support stop-web build-mcp-server build-web service-install service-stop service-detach service-detach-stop build test reset-history
+.PHONY: run run-local run-web run-web-local run-stats run-compare run-compare-strategies run-compare-memory run-compare-profiles run-check-invariants run-mcp-tools run-mcp-call run-mcp-demo run-mcp-pipeline run-mcp-orchestrate run-rag run-rag-local run-rag-local-vs-cloud run-rag-optimize opt-create run-rag-eval run-rag-modes run-rag-citations run-chat run-chat-scenarios run-help run-review run-review-pr run-support run-files stop-web build-mcp-server build-web service-install service-stop service-detach service-detach-stop build test reset-history
 
 # ===== Локальная LLM (День 27) =====
 # Подключение к локальной модели через Ollama (OpenAI-совместимый эндпоинт).
@@ -69,6 +69,17 @@ run-mcp-pipeline:
 # Пример: make run-mcp-orchestrate QUERY=mcp
 run-mcp-orchestrate:
 	go run ./cmd/cli --mcp-orchestrate "$(QUERY)"
+
+# ===== Ассистент файловых операций: --files "<задача>" (plan-then-execute) =====
+# Цель на уровне задачи: LLM строит план (сценарий/поиски/чтения/выходной файл),
+# CLI исполняет через MCP-инструменты домена files (read/search/write) и
+# показывает результат (отчёт в results/ или записанный файл + git diff).
+# Примеры:
+#   make run-files GOAL="найти все места использования llm.New"
+#   make run-files GOAL="сгенерировать changelog по последним коммитам"
+# Требует собранный mcp-server (make build-mcp-server) и доступ к LLM (.env).
+run-files:
+	go run ./cmd/cli --files "$(GOAL)"
 
 # ===== Ассистент поддержки: --support (RAG по FAQ + контекст тикета из JSON-CRM) =====
 # Ответ на вопрос о продукте с учётом данных тикета (MCP get_ticket, домен
